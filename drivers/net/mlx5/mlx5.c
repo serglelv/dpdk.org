@@ -4785,8 +4785,10 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		    (pci_dev->addr.devid != pci_addr.devid) ||
 		    (pci_dev->addr.function != pci_addr.function))
 			continue;
-		vf = (pci_dev->id.device_id ==
-		      PCI_DEVICE_ID_MELLANOX_CONNECTX3VF);
+		vf = ((pci_dev->id.device_id ==
+		       PCI_DEVICE_ID_MELLANOX_CONNECTX4VF) ||
+		      (pci_dev->id.device_id ==
+		       PCI_DEVICE_ID_MELLANOX_CONNECTX4LXVF));
 		INFO("PCI information matches, using device \"%s\" (VF: %s)",
 		     list[i]->name, (vf ? "true" : "false"));
 		attr_ctx = ibv_open_device(list[i]);
@@ -5020,19 +5022,25 @@ error:
 static const struct rte_pci_id mlx5_pci_id_map[] = {
 	{
 		.vendor_id = PCI_VENDOR_ID_MELLANOX,
-		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX3,
+		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX4,
 		.subsystem_vendor_id = PCI_ANY_ID,
 		.subsystem_device_id = PCI_ANY_ID
 	},
 	{
 		.vendor_id = PCI_VENDOR_ID_MELLANOX,
-		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX3PRO,
+		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX4VF,
 		.subsystem_vendor_id = PCI_ANY_ID,
 		.subsystem_device_id = PCI_ANY_ID
 	},
 	{
 		.vendor_id = PCI_VENDOR_ID_MELLANOX,
-		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX3VF,
+		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX4LX,
+		.subsystem_vendor_id = PCI_ANY_ID,
+		.subsystem_device_id = PCI_ANY_ID
+	},
+	{
+		.vendor_id = PCI_VENDOR_ID_MELLANOX,
+		.device_id = PCI_DEVICE_ID_MELLANOX_CONNECTX4LXVF,
 		.subsystem_vendor_id = PCI_ANY_ID,
 		.subsystem_device_id = PCI_ANY_ID
 	},
