@@ -104,10 +104,6 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		infiniband/verbs.h \
 		enum IBV_EXP_DEVICE_UD_RSS $(AUTOCONF_OUTPUT)
 	$Q sh -- '$<' '$@' \
-		INLINE_RECV \
-		infiniband/verbs.h \
-		enum IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ $(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
 		HAVE_EXP_QUERY_DEVICE \
 		infiniband/verbs.h \
 		type 'struct ibv_exp_device_attr' $(AUTOCONF_OUTPUT)
