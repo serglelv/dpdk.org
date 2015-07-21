@@ -109,9 +109,6 @@ struct priv {
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int rss:1; /* RSS is enabled. */
 	unsigned int vf:1; /* This is a VF device. */
-#ifdef INLINE_RECV
-	unsigned int inl_recv_size; /* Inline recv size */
-#endif
 	unsigned int max_rss_tbl_sz; /* Maximum number of RSS queues. */
 	/* RX/TX queues. */
 	struct rxq rxq_parent; /* Parent queue when RSS is enabled. */

@@ -462,10 +462,6 @@ rxq_setup_qp(struct priv *priv, struct ibv_cq *cq, uint16_t desc,
 		.res_domain = rd,
 	};
 
-#ifdef INLINE_RECV
-	attr.max_inl_recv = priv->inl_recv_size;
-	attr.comp_mask |= IBV_EXP_QP_INIT_ATTR_INL_RECV;
-#endif
 	return ibv_exp_create_qp(priv->ctx, &attr);
 }
 
@@ -515,10 +511,6 @@ rxq_setup_qp_rss(struct priv *priv, struct ibv_cq *cq, uint16_t desc,
 		.res_domain = rd,
 	};
 
-#ifdef INLINE_RECV
-	attr.max_inl_recv = priv->inl_recv_size,
-	attr.comp_mask |= IBV_EXP_QP_INIT_ATTR_INL_RECV;
-#endif
 	if (parent) {
 		attr.qpg.qpg_type = IBV_EXP_QPG_PARENT;
 		/* TSS isn't necessary. */

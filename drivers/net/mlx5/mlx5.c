@@ -410,31 +410,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		DEBUG("L2 tunnel checksum offloads are %ssupported",
 		      (priv->hw_csum_l2tun ? "" : "not "));
 
-#ifdef INLINE_RECV
-		priv->inl_recv_size = mlx5_getenv_int("MLX5_INLINE_RECV_SIZE");
-
-		if (priv->inl_recv_size) {
-			exp_device_attr.comp_mask =
-				IBV_EXP_DEVICE_ATTR_INLINE_RECV_SZ;
-			if (ibv_exp_query_device(ctx, &exp_device_attr)) {
-				INFO("Couldn't query device for inline-receive"
-				     " capabilities.");
-				priv->inl_recv_size = 0;
-			} else {
-				if ((unsigned)exp_device_attr.inline_recv_sz <
-				    priv->inl_recv_size) {
-					INFO("Max inline-receive (%d) <"
-					     " requested inline-receive (%u)",
-					     exp_device_attr.inline_recv_sz,
-					     priv->inl_recv_size);
-					priv->inl_recv_size =
-						exp_device_attr.inline_recv_sz;
-				}
-			}
-			INFO("Set inline receive size to %u",
-			     priv->inl_recv_size);
-		}
-#endif /* INLINE_RECV */
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
 		(void)mlx5_getenv_int;
