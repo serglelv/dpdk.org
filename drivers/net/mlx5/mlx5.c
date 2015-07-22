@@ -162,16 +162,9 @@ struct rxq {
 	struct rte_mempool *mp; /* Memory Pool for allocations. */
 	struct ibv_mr *mr; /* Memory Region (for mp). */
 	struct ibv_cq *cq; /* Completion Queue. */
-	struct ibv_qp *qp; /* Queue Pair. */
-	struct ibv_exp_qp_burst_family *if_qp; /* QP burst interface. */
+	struct ibv_exp_wq *wq; /* Work Queue. */
+	struct ibv_exp_wq_family *if_wq; /* WQ burst interface. */
 	struct ibv_exp_cq_family *if_cq; /* CQ interface. */
-	/*
-	 * Each VLAN ID requires a separate flow steering rule.
-	 */
-	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
-	struct ibv_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
-	struct ibv_flow *promisc_flow; /* Promiscuous flow. */
-	struct ibv_flow *allmulti_flow; /* Multicast flow. */
 	unsigned int port_id; /* Port ID for incoming packets. */
 	unsigned int elts_n; /* (*elts)[] length. */
 	unsigned int elts_head; /* Current index in (*elts)[]. */
@@ -230,6 +223,16 @@ struct txq {
 	struct ibv_exp_res_domain *rd; /* Resource Domain. */
 };
 
+struct hash_rxq {
+	struct priv *priv; /* Back pointer to private data. */
+	struct ibv_qp *qp; /* RX hash QP. */
+	/* Each VLAN ID requires a separate flow steering rule. */
+	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
+	struct ibv_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
+	struct ibv_flow *promisc_flow; /* Promiscuous flow. */
+	struct ibv_flow *allmulti_flow; /* Multicast flow. */
+};
+
 struct priv {
 	struct rte_eth_dev *dev; /* Ethernet device. */
 	struct ibv_context *ctx; /* Verbs context. */
@@ -258,15 +261,18 @@ struct priv {
 	unsigned int hw_rss:1; /* RSS is supported. */
 	unsigned int hw_csum:1; /* Checksum offload is supported. */
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
-	unsigned int rss:1; /* RSS is enabled. */
 	unsigned int vf:1; /* This is a VF device. */
 	unsigned int max_rss_tbl_sz; /* Maximum number of RSS queues. */
 	/* RX/TX queues. */
-	struct rxq rxq_parent; /* Parent queue when RSS is enabled. */
 	unsigned int rxqs_n; /* RX queues array size. */
 	unsigned int txqs_n; /* TX queues array size. */
 	struct rxq *(*rxqs)[]; /* RX queues. */
 	struct txq *(*txqs)[]; /* TX queues. */
+	/* Indirection table referencing all RX WQs. */
+	struct ibv_exp_rwq_ind_table *ind_table;
+	/* RX hash QPs that feed the indirection table. */
+	struct hash_rxq (*hash_rxqs)[];
+	unsigned int hash_rxqs_n; /* RX hash QPs array size. */
 	rte_spinlock_t lock; /* Lock for control functions. */
 };
 
@@ -627,6 +633,222 @@ priv_set_flags(struct priv *priv, unsigned int keep, unsigned int flags)
 	return priv_set_sysfs_ulong(priv, "flags", tmp);
 }
 
+/**
+ * Return nearest power of two above input value.
+ *
+ * @param v
+ *   Input value.
+ *
+ * @return
+ *   Nearest power of two above input value.
+ */
+static unsigned int log2above(unsigned int v)
+{
+	unsigned int l;
+	unsigned int r;
+
+	for (l = 0, r = 0; (v >> 1); ++l, v >>= 1)
+		r |= (v & 1);
+	return (l + r);
+}
+
+/**
+ * Initialize RX hash queues and indirection table.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_create_hash_rxqs(struct priv *priv)
+{
+	/* Default key also used for ConnectX-3. */
+	static uint8_t rss_hash_key[] = {
+		0x2c, 0xc6, 0x81, 0xd1,
+		0x5b, 0xdb, 0xf4, 0xf7,
+		0xfc, 0xa2, 0x83, 0x19,
+		0xdb, 0x1a, 0x3e, 0x94,
+		0x6b, 0x9e, 0x38, 0xd9,
+		0x2c, 0x9c, 0x03, 0xd1,
+		0xad, 0x99, 0x44, 0xa7,
+		0xd9, 0x56, 0x3d, 0x59,
+		0x06, 0x3c, 0x25, 0xf3,
+		0xfc, 0x1f, 0xdc, 0x2a,
+	};
+	static const uint64_t rss_hash_table[] = {
+		/* TCPv4. */
+		(IBV_EXP_RX_HASH_SRC_IPV4 | IBV_EXP_RX_HASH_DST_IPV4 |
+		 IBV_EXP_RX_HASH_SRC_PORT_TCP | IBV_EXP_RX_HASH_DST_PORT_TCP),
+		/* UDPv4. */
+		(IBV_EXP_RX_HASH_SRC_IPV4 | IBV_EXP_RX_HASH_DST_IPV4 |
+		 IBV_EXP_RX_HASH_SRC_PORT_UDP | IBV_EXP_RX_HASH_DST_PORT_UDP),
+		/* TCPv6. */
+		(IBV_EXP_RX_HASH_SRC_IPV6 | IBV_EXP_RX_HASH_DST_IPV6 |
+		 IBV_EXP_RX_HASH_SRC_PORT_TCP | IBV_EXP_RX_HASH_DST_PORT_TCP),
+		/* UDPv6. */
+		(IBV_EXP_RX_HASH_SRC_IPV6 | IBV_EXP_RX_HASH_DST_IPV6 |
+		 IBV_EXP_RX_HASH_SRC_PORT_UDP | IBV_EXP_RX_HASH_DST_PORT_UDP),
+		/* Other IPv4. */
+		(IBV_EXP_RX_HASH_SRC_IPV4 | IBV_EXP_RX_HASH_DST_IPV4),
+		/* Other IPv6. */
+		(IBV_EXP_RX_HASH_SRC_IPV6 | IBV_EXP_RX_HASH_DST_IPV6),
+		/* None, used for everything else. */
+		0,
+	};
+
+	DEBUG("allocating RX hash queues for %u WQs", priv->rxqs_n);
+	assert(priv->ind_table == NULL);
+	assert(priv->hash_rxqs == NULL);
+	assert(priv->hash_rxqs_n == 0);
+	assert(priv->pd != NULL);
+	assert(priv->ctx != NULL);
+	if (priv->rxqs_n == 0)
+		return EINVAL;
+	assert(priv->rxqs != NULL);
+
+	/* FIXME: large data structures are allocated on the stack. */
+	unsigned int wqs_n = (1 << log2above(priv->rxqs_n));
+	struct ibv_exp_wq *wqs[wqs_n];
+	struct ibv_exp_rwq_ind_table_init_attr ind_init_attr = {
+		.pd = priv->pd,
+		.log_ind_tbl_size = log2above(priv->rxqs_n),
+		.ind_tbl = wqs,
+		.comp_mask = 0,
+	};
+	struct ibv_exp_rwq_ind_table *ind_table = NULL;
+	/* If only one RX queue is configured, RSS is not needed and a single
+	 * empty hash entry is used (last rss_hash_table[] entry). */
+	unsigned int hash_rxqs_n =
+		((priv->rxqs_n == 1) ? 1 : elemof(rss_hash_table));
+	struct hash_rxq (*hash_rxqs)[hash_rxqs_n] = NULL;
+	unsigned int i;
+	unsigned int j;
+	int err = 0;
+
+	if (wqs_n < priv->rxqs_n) {
+		ERROR("cannot handle this many RX queues (%u)", priv->rxqs_n);
+		err = ERANGE;
+		goto error;
+	}
+	if (wqs_n != priv->rxqs_n)
+		WARN("%u RX queues are configured, consider rounding this"
+		     " number to the next power of two (%u) for optimal"
+		     " performance",
+		     priv->rxqs_n, wqs_n);
+	/* When the number of RX queues is not a power of two, the remaining
+	 * table entries are padded with reused WQs and hashes are not spread
+	 * uniformly. */
+	for (i = 0, j = 0; (i != wqs_n); ++i) {
+		wqs[i] = (*priv->rxqs)[j]->wq;
+		if (++j == priv->rxqs_n)
+			j = 0;
+	}
+	errno = 0;
+	ind_table = ibv_exp_create_rwq_ind_table(priv->ctx, &ind_init_attr);
+	if (ind_table == NULL) {
+		/* Not clear whether errno is set. */
+		err = (errno ? errno : EINVAL);
+		ERROR("RX indirection table creation failed with error %d: %s",
+		      err, strerror(err));
+		goto error;
+	}
+	/* Allocate array that holds hash RX queues and related data. */
+	hash_rxqs = rte_malloc(__func__, sizeof(*hash_rxqs), 0);
+	if (hash_rxqs == NULL) {
+		err = ENOMEM;
+		ERROR("cannot allocate hash RX queues container: %s",
+		      strerror(err));
+		goto error;
+	}
+	for (i = 0, j = (elemof(rss_hash_table) - hash_rxqs_n);
+	     (j != elemof(rss_hash_table));
+	     ++i, ++j) {
+		struct hash_rxq *hash_rxq = &(*hash_rxqs)[i];
+
+		struct ibv_exp_rx_hash_conf hash_conf = {
+			.rx_hash_function = IBV_EXP_RX_HASH_FUNC_TOEPLITZ,
+			.rx_hash_key_len = sizeof(rss_hash_key),
+			.rx_hash_key = rss_hash_key,
+			.rx_hash_fields_mask = rss_hash_table[j],
+			.rwq_ind_tbl = ind_table,
+		};
+		struct ibv_exp_qp_init_attr qp_init_attr = {
+			.max_inl_recv = 0, /* Currently not supported. */
+			.qp_type = IBV_QPT_RAW_PACKET,
+			.comp_mask = (IBV_EXP_QP_INIT_ATTR_PD |
+				      IBV_EXP_QP_INIT_ATTR_RX_HASH),
+			.pd = priv->pd,
+			.rx_hash_conf = &hash_conf,
+			.port_num = priv->port,
+		};
+
+		*hash_rxq = (struct hash_rxq){
+			.priv = priv,
+			.qp = ibv_exp_create_qp(priv->ctx, &qp_init_attr),
+		};
+		if (hash_rxq->qp == NULL) {
+			err = (errno ? errno : EINVAL);
+			ERROR("RX hash QP creation failure: %s",
+			      strerror(err));
+			while (i) {
+				hash_rxq = &(*hash_rxqs)[--i];
+				claim_zero(ibv_destroy_qp(hash_rxq->qp));
+			}
+			goto error;
+		}
+	}
+	priv->ind_table = ind_table;
+	priv->hash_rxqs = hash_rxqs;
+	priv->hash_rxqs_n = hash_rxqs_n;
+	assert(err == 0);
+	return 0;
+error:
+	rte_free(hash_rxqs);
+	if (ind_table != NULL)
+		claim_zero(ibv_exp_destroy_rwq_ind_table(ind_table));
+	return err;
+}
+
+/**
+ * Clean up RX hash queues and indirection table.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ */
+static void
+priv_destroy_hash_rxqs(struct priv *priv)
+{
+	unsigned int i;
+
+	DEBUG("destroying %u RX hash queues", priv->hash_rxqs_n);
+	if (priv->hash_rxqs_n == 0) {
+		assert(priv->hash_rxqs == NULL);
+		assert(priv->ind_table == NULL);
+		return;
+	}
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
+		unsigned int j, k;
+
+		assert(hash_rxq->priv == priv);
+		assert(hash_rxq->qp != NULL);
+		/* Also check that there are no remaining flows. */
+		assert(hash_rxq->allmulti_flow == NULL);
+		assert(hash_rxq->promisc_flow == NULL);
+		for (j = 0; (j != elemof(hash_rxq->mac_flow)); ++j)
+			for (k = 0; (k != elemof(hash_rxq->mac_flow[j])); ++k)
+				assert(hash_rxq->mac_flow[j][k] == NULL);
+		claim_zero(ibv_destroy_qp(hash_rxq->qp));
+	}
+	priv->hash_rxqs_n = 0;
+	rte_free(priv->hash_rxqs);
+	priv->hash_rxqs = NULL;
+	claim_zero(ibv_exp_destroy_rwq_ind_table(priv->ind_table));
+	priv->ind_table = NULL;
+}
+
 /* Device configuration. */
 
 static int
@@ -641,7 +863,6 @@ rxq_cleanup(struct rxq *rxq);
  * Ethernet device configuration.
  *
  * Prepare the driver for a given number of TX and RX queues.
- * Allocate parent RSS queue when several RX queues are requested.
  *
  * @param dev
  *   Pointer to Ethernet device structure.
@@ -655,8 +876,7 @@ dev_configure(struct rte_eth_dev *dev)
 	struct priv *priv = dev->data->dev_private;
 	unsigned int rxqs_n = dev->data->nb_rx_queues;
 	unsigned int txqs_n = dev->data->nb_tx_queues;
-	unsigned int tmp;
-	int ret;
+	unsigned int i;
 
 	priv->rxqs = (void *)dev->data->rx_queues;
 	priv->txqs = (void *)dev->data->tx_queues;
@@ -669,25 +889,12 @@ dev_configure(struct rte_eth_dev *dev)
 		return 0;
 	INFO("%p: RX queues number update: %u -> %u",
 	     (void *)dev, priv->rxqs_n, rxqs_n);
-	/* If RSS is enabled, disable it first. */
-	if (priv->rss) {
-		unsigned int i;
-
-		/* Only if there are no remaining child RX queues. */
-		for (i = 0; (i != priv->rxqs_n); ++i)
-			if ((*priv->rxqs)[i] != NULL)
-				return EINVAL;
-		rxq_cleanup(&priv->rxq_parent);
-		priv->rss = 0;
-		priv->rxqs_n = 0;
-	}
-	if (rxqs_n <= 1) {
-		/* Nothing else to do. */
-		priv->rxqs_n = rxqs_n;
-		return 0;
-	}
-	/* Allocate a new RSS parent queue if supported by hardware. */
-	if (!priv->hw_rss) {
+	/* Fail if at least one RX queue is still allocated. */
+	for (i = 0; (i != priv->rxqs_n); ++i)
+		if ((*priv->rxqs)[i] != NULL)
+			return EINVAL;
+	/* Check requested number of RX queues. */
+	if ((rxqs_n > 1) && (!priv->hw_rss)) {
 		ERROR("%p: only a single RX queue can be configured when"
 		      " hardware doesn't support RSS",
 		      (void *)dev);
@@ -699,17 +906,8 @@ dev_configure(struct rte_eth_dev *dev)
 		      (void *)dev, priv->max_rss_tbl_sz);
 		return EINVAL;
 	}
-	priv->rss = 1;
-	tmp = priv->rxqs_n;
 	priv->rxqs_n = rxqs_n;
-	ret = rxq_setup(dev, &priv->rxq_parent, 0, 0, NULL, NULL);
-	if (!ret)
-		return 0;
-	/* Failure, rollback. */
-	priv->rss = 0;
-	priv->rxqs_n = tmp;
-	assert(ret > 0);
-	return ret;
+	return 0;
 }
 
 /**
@@ -1893,86 +2091,100 @@ rxq_free_elts(struct rxq *rxq)
 /**
  * Delete flow steering rule.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index.
  * @param vlan_index
  *   VLAN index.
  */
 static void
-rxq_del_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
+hash_rxq_del_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
+		  unsigned int vlan_index)
 {
 #ifndef NDEBUG
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 		(const uint8_t (*)[ETHER_ADDR_LEN])
 		priv->mac[mac_index].addr_bytes;
 #endif
-	assert(rxq->mac_flow[mac_index][vlan_index] != NULL);
+	assert(hash_rxq->mac_flow[mac_index][vlan_index] != NULL);
 	DEBUG("%p: removing MAC address %02x:%02x:%02x:%02x:%02x:%02x index %u"
 	      " (VLAN ID %" PRIu16 ")",
-	      (void *)rxq,
+	      (void *)hash_rxq,
 	      (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5],
 	      mac_index, priv->vlan_filter[vlan_index].id);
-	claim_zero(ibv_destroy_flow(rxq->mac_flow[mac_index][vlan_index]));
-	rxq->mac_flow[mac_index][vlan_index] = NULL;
+	claim_zero(ibv_destroy_flow(hash_rxq->mac_flow
+				    [mac_index][vlan_index]));
+	hash_rxq->mac_flow[mac_index][vlan_index] = NULL;
 }
 
 /**
- * Unregister a MAC address from a RX queue.
+ * Unregister a MAC address from a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index.
  */
 static void
-rxq_mac_addr_del(struct rxq *rxq, unsigned int mac_index)
+hash_rxq_mac_addr_del(struct hash_rxq *hash_rxq, unsigned int mac_index)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 	unsigned int vlans = 0;
 
 	assert(mac_index < elemof(priv->mac));
-	if (!BITFIELD_ISSET(rxq->mac_configured, mac_index))
+	if (!BITFIELD_ISSET(hash_rxq->mac_configured, mac_index))
 		return;
 	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled)
 			continue;
-		rxq_del_flow(rxq, mac_index, i);
+		hash_rxq_del_flow(hash_rxq, mac_index, i);
 		vlans++;
 	}
 	if (!vlans) {
-		rxq_del_flow(rxq, mac_index, 0);
+		hash_rxq_del_flow(hash_rxq, mac_index, 0);
 	}
-	BITFIELD_RESET(rxq->mac_configured, mac_index);
+	BITFIELD_RESET(hash_rxq->mac_configured, mac_index);
 }
 
 /**
- * Unregister all MAC addresses from a RX queue.
+ * Unregister all MAC addresses from a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  */
 static void
-rxq_mac_addrs_del(struct rxq *rxq)
+hash_rxq_mac_addrs_del(struct hash_rxq *hash_rxq)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 
 	for (i = 0; (i != elemof(priv->mac)); ++i)
-		rxq_mac_addr_del(rxq, i);
+		hash_rxq_mac_addr_del(hash_rxq, i);
 }
 
-static int rxq_promiscuous_enable(struct rxq *);
-static void rxq_promiscuous_disable(struct rxq *);
+/**
+ * Unregister all MAC addresses from all RX hash queues.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ */
+static void
+priv_mac_addrs_disable(struct priv *priv)
+{
+	unsigned int i;
+
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);
+}
 
 /**
  * Add single flow steering rule.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index to register.
  * @param vlan_index
@@ -1982,10 +2194,11 @@ static void rxq_promiscuous_disable(struct rxq *);
  *   0 on success, errno value on failure.
  */
 static int
-rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
+hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
+		  unsigned int vlan_index)
 {
 	struct ibv_flow *flow;
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 			(const uint8_t (*)[ETHER_ADDR_LEN])
 			priv->mac[mac_index].addr_bytes;
@@ -2030,18 +2243,18 @@ rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
 	};
 	DEBUG("%p: adding MAC address %02x:%02x:%02x:%02x:%02x:%02x index %u"
 	      " (VLAN %s %" PRIu16 ")",
-	      (void *)rxq,
+	      (void *)hash_rxq,
 	      (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5],
 	      mac_index,
 	      ((vlan_index != -1u) ? "ID" : "index"),
 	      ((vlan_index != -1u) ? priv->vlan_filter[vlan_index].id : -1u));
 	/* Create related flow. */
 	errno = 0;
-	flow = ibv_create_flow(rxq->qp, attr);
+	flow = ibv_create_flow(hash_rxq->qp, attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
-		      (void *)rxq, errno,
+		      (void *)hash_rxq, errno,
 		      (errno ? strerror(errno) : "Unknown error"));
 		if (errno)
 			return errno;
@@ -2049,16 +2262,16 @@ rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
 	}
 	if (vlan_index == -1u)
 		vlan_index = 0;
-	assert(rxq->mac_flow[mac_index][vlan_index] == NULL);
-	rxq->mac_flow[mac_index][vlan_index] = flow;
+	assert(hash_rxq->mac_flow[mac_index][vlan_index] == NULL);
+	hash_rxq->mac_flow[mac_index][vlan_index] = flow;
 	return 0;
 }
 
 /**
- * Register a MAC address in a RX queue.
+ * Register a MAC address in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index to register.
  *
@@ -2066,22 +2279,22 @@ rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
  *   0 on success, errno value on failure.
  */
 static int
-rxq_mac_addr_add(struct rxq *rxq, unsigned int mac_index)
+hash_rxq_mac_addr_add(struct hash_rxq *hash_rxq, unsigned int mac_index)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 	unsigned int vlans = 0;
 	int ret;
 
 	assert(mac_index < elemof(priv->mac));
-	if (BITFIELD_ISSET(rxq->mac_configured, mac_index))
-		rxq_mac_addr_del(rxq, mac_index);
+	if (BITFIELD_ISSET(hash_rxq->mac_configured, mac_index))
+		hash_rxq_mac_addr_del(hash_rxq, mac_index);
 	/* Fill VLAN specifications. */
 	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled)
 			continue;
 		/* Create related flow. */
-		ret = rxq_add_flow(rxq, mac_index, i);
+		ret = hash_rxq_add_flow(hash_rxq, mac_index, i);
 		if (!ret) {
 			vlans++;
 			continue;
@@ -2089,45 +2302,73 @@ rxq_mac_addr_add(struct rxq *rxq, unsigned int mac_index)
 		/* Failure, rollback. */
 		while (i != 0)
 			if (priv->vlan_filter[--i].enabled)
-				rxq_del_flow(rxq, mac_index, i);
+				hash_rxq_del_flow(hash_rxq, mac_index, i);
 		assert(ret > 0);
 		return ret;
 	}
 	/* In case there is no VLAN filter. */
 	if (!vlans) {
-		ret = rxq_add_flow(rxq, mac_index, -1);
+		ret = hash_rxq_add_flow(hash_rxq, mac_index, -1);
 		if (ret)
 			return ret;
 	}
-	BITFIELD_SET(rxq->mac_configured, mac_index);
+	BITFIELD_SET(hash_rxq->mac_configured, mac_index);
 	return 0;
 }
 
 /**
- * Register all MAC addresses in a RX queue.
+ * Register all MAC addresses in a RX hash queue.
  *
- * @param rxq
+ * @param hash_rxq
  *   Pointer to RX queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
  */
 static int
-rxq_mac_addrs_add(struct rxq *rxq)
+hash_rxq_mac_addrs_add(struct hash_rxq *hash_rxq)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 	int ret;
 
 	for (i = 0; (i != elemof(priv->mac)); ++i) {
 		if (!BITFIELD_ISSET(priv->mac_configured, i))
 			continue;
-		ret = rxq_mac_addr_add(rxq, i);
+		ret = hash_rxq_mac_addr_add(hash_rxq, i);
 		if (!ret)
 			continue;
 		/* Failure, rollback. */
 		while (i != 0)
-			rxq_mac_addr_del(rxq, --i);
+			hash_rxq_mac_addr_del(hash_rxq, --i);
+		assert(ret > 0);
+		return ret;
+	}
+	return 0;
+}
+
+/**
+ * Register all MAC addresses in all RX hash queues.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_mac_addrs_enable(struct priv *priv)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		ret = hash_rxq_mac_addrs_add(&(*priv->hash_rxqs)[i]);
+		if (!ret)
+			continue;
+		/* Failure, rollback. */
+		while (i != 0)
+			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[--i]);
 		assert(ret > 0);
 		return ret;
 	}
@@ -2137,8 +2378,7 @@ rxq_mac_addrs_add(struct rxq *rxq)
 /**
  * Unregister a MAC address.
  *
- * In RSS mode, the MAC address is unregistered from the parent queue,
- * otherwise it is unregistered from each queue directly.
+ * This is done for each RX hash queue.
  *
  * @param priv
  *   Pointer to private structure.
@@ -2153,21 +2393,15 @@ priv_mac_addr_del(struct priv *priv, unsigned int mac_index)
 	assert(mac_index < elemof(priv->mac));
 	if (!BITFIELD_ISSET(priv->mac_configured, mac_index))
 		return;
-	if (priv->rss) {
-		rxq_mac_addr_del(&priv->rxq_parent, mac_index);
-		goto end;
-	}
-	for (i = 0; (i != priv->dev->data->nb_rx_queues); ++i)
-		rxq_mac_addr_del((*priv->rxqs)[i], mac_index);
-end:
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_mac_addr_del(&(*priv->hash_rxqs)[i], mac_index);
 	BITFIELD_RESET(priv->mac_configured, mac_index);
 }
 
 /**
  * Register a MAC address.
  *
- * In RSS mode, the MAC address is registered in the parent queue,
- * otherwise it is registered in each queue directly.
+ * This is done for each RX hash queue.
  *
  * @param priv
  *   Pointer to private structure.
@@ -2210,32 +2444,23 @@ priv_mac_addr_add(struct priv *priv, unsigned int mac_index,
 	/* If device isn't started, this is all we need to do. */
 	if (!priv->started) {
 #ifndef NDEBUG
-		/* Verify that all queues have this index disabled. */
-		for (i = 0; (i != priv->rxqs_n); ++i) {
-			if ((*priv->rxqs)[i] == NULL)
-				continue;
+		/* Verify that all RX hash queues have this index disabled. */
+		for (i = 0; (i != priv->hash_rxqs_n); ++i) {
 			assert(!BITFIELD_ISSET
-			       ((*priv->rxqs)[i]->mac_configured, mac_index));
+			       ((*priv->hash_rxqs)[i].mac_configured,
+				mac_index));
 		}
 #endif
 		goto end;
 	}
-	if (priv->rss) {
-		ret = rxq_mac_addr_add(&priv->rxq_parent, mac_index);
-		if (ret)
-			return ret;
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i) {
-		if ((*priv->rxqs)[i] == NULL)
-			continue;
-		ret = rxq_mac_addr_add((*priv->rxqs)[i], mac_index);
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		ret = hash_rxq_mac_addr_add(&(*priv->hash_rxqs)[i], mac_index);
 		if (!ret)
 			continue;
 		/* Failure, rollback. */
 		while (i != 0)
-			if ((*priv->rxqs)[(--i)] != NULL)
-				rxq_mac_addr_del((*priv->rxqs)[i], mac_index);
+			hash_rxq_mac_addr_del(&(*priv->hash_rxqs)[--i],
+					      mac_index);
 		return ret;
 	}
 end:
@@ -2244,119 +2469,235 @@ end:
 }
 
 /**
- * Enable allmulti mode in a RX queue.
+ * Enable allmulti mode in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
  */
 static int
-rxq_allmulticast_enable(struct rxq *rxq)
+hash_rxq_allmulticast_enable(struct hash_rxq *hash_rxq)
 {
 	struct ibv_flow *flow;
 	struct ibv_flow_attr attr = {
 		.type = IBV_FLOW_ATTR_MC_DEFAULT,
 		.num_of_specs = 0,
-		.port = rxq->priv->port,
+		.port = hash_rxq->priv->port,
 		.flags = 0
 	};
 
-	DEBUG("%p: enabling allmulticast mode", (void *)rxq);
-	if (rxq->allmulti_flow != NULL)
+	DEBUG("%p: enabling allmulticast mode", (void *)hash_rxq);
+	if (hash_rxq->allmulti_flow != NULL)
 		return EBUSY;
 	errno = 0;
-	flow = ibv_create_flow(rxq->qp, &attr);
+	flow = ibv_create_flow(hash_rxq->qp, &attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
-		      (void *)rxq, errno,
+		      (void *)hash_rxq, errno,
 		      (errno ? strerror(errno) : "Unknown error"));
 		if (errno)
 			return errno;
 		return EINVAL;
 	}
-	rxq->allmulti_flow = flow;
-	DEBUG("%p: allmulticast mode enabled", (void *)rxq);
+	hash_rxq->allmulti_flow = flow;
+	DEBUG("%p: allmulticast mode enabled", (void *)hash_rxq);
 	return 0;
 }
 
-/**
- * Disable allmulti mode in a RX queue.
- *
- * @param rxq
- *   Pointer to RX queue structure.
- */
-static void
-rxq_allmulticast_disable(struct rxq *rxq)
-{
-	DEBUG("%p: disabling allmulticast mode", (void *)rxq);
-	if (rxq->allmulti_flow == NULL)
-		return;
-	claim_zero(ibv_destroy_flow(rxq->allmulti_flow));
-	rxq->allmulti_flow = NULL;
-	DEBUG("%p: allmulticast mode disabled", (void *)rxq);
-}
+static void hash_rxq_allmulticast_disable(struct hash_rxq *);
 
 /**
- * Enable promiscuous mode in a RX queue.
+ * Enable allmulti mode in all RX hash queues.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param priv
+ *   Private structure.
  *
  * @return
  *   0 on success, errno value on failure.
  */
 static int
-rxq_promiscuous_enable(struct rxq *rxq)
+priv_allmulticast_enable(struct priv *priv)
+{
+	unsigned int i;
+
+	if (priv->allmulti)
+		return 0;
+	/* If device isn't started, this is all we need to do. */
+	if (!priv->started)
+		goto end;
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
+		int ret;
+
+		ret = hash_rxq_allmulticast_enable(hash_rxq);
+		if (!ret)
+			continue;
+		/* Failure, rollback. */
+		while (i != 0) {
+			hash_rxq = &(*priv->hash_rxqs)[--i];
+			hash_rxq_allmulticast_disable(hash_rxq);
+		}
+		return ret;
+	}
+end:
+	priv->allmulti = 1;
+	return 0;
+}
+
+/**
+ * Disable allmulti mode in a RX hash queue.
+ *
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
+ */
+static void
+hash_rxq_allmulticast_disable(struct hash_rxq *hash_rxq)
+{
+	DEBUG("%p: disabling allmulticast mode", (void *)hash_rxq);
+	if (hash_rxq->allmulti_flow == NULL)
+		return;
+	claim_zero(ibv_destroy_flow(hash_rxq->allmulti_flow));
+	hash_rxq->allmulti_flow = NULL;
+	DEBUG("%p: allmulticast mode disabled", (void *)hash_rxq);
+}
+
+/**
+ * Disable allmulti mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
+ */
+static void
+priv_allmulticast_disable(struct priv *priv)
+{
+	unsigned int i;
+
+	if (!priv->allmulti)
+		return;
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_allmulticast_disable(&(*priv->hash_rxqs)[i]);
+	priv->allmulti = 0;
+}
+
+/**
+ * Enable promiscuous mode in a RX hash queue.
+ *
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+hash_rxq_promiscuous_enable(struct hash_rxq *hash_rxq)
 {
 	struct ibv_flow *flow;
 	struct ibv_flow_attr attr = {
 		.type = IBV_FLOW_ATTR_ALL_DEFAULT,
 		.num_of_specs = 0,
-		.port = rxq->priv->port,
+		.port = hash_rxq->priv->port,
 		.flags = 0
 	};
 
-	if (rxq->priv->vf)
+	if (hash_rxq->priv->vf)
 		return 0;
-	DEBUG("%p: enabling promiscuous mode", (void *)rxq);
-	if (rxq->promisc_flow != NULL)
+	DEBUG("%p: enabling promiscuous mode", (void *)hash_rxq);
+	if (hash_rxq->promisc_flow != NULL)
 		return EBUSY;
 	errno = 0;
-	flow = ibv_create_flow(rxq->qp, &attr);
+	flow = ibv_create_flow(hash_rxq->qp, &attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
-		      (void *)rxq, errno,
+		      (void *)hash_rxq, errno,
 		      (errno ? strerror(errno) : "Unknown error"));
 		if (errno)
 			return errno;
 		return EINVAL;
 	}
-	rxq->promisc_flow = flow;
-	DEBUG("%p: promiscuous mode enabled", (void *)rxq);
+	hash_rxq->promisc_flow = flow;
+	DEBUG("%p: promiscuous mode enabled", (void *)hash_rxq);
+	return 0;
+}
+
+static void hash_rxq_promiscuous_disable(struct hash_rxq *);
+
+/**
+ * Enable promiscuous mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_promiscuous_enable(struct priv *priv)
+{
+	unsigned int i;
+
+	if (priv->promisc)
+		return 0;
+	/* If device isn't started, this is all we need to do. */
+	if (!priv->started)
+		goto end;
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
+		int ret;
+
+		ret = hash_rxq_promiscuous_enable(hash_rxq);
+		if (!ret)
+			continue;
+		/* Failure, rollback. */
+		while (i != 0) {
+			hash_rxq = &(*priv->hash_rxqs)[--i];
+			hash_rxq_promiscuous_disable(hash_rxq);
+		}
+		return ret;
+	}
+end:
+	priv->promisc = 1;
 	return 0;
 }
 
 /**
- * Disable promiscuous mode in a RX queue.
+ * Disable promiscuous mode in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  */
 static void
-rxq_promiscuous_disable(struct rxq *rxq)
+hash_rxq_promiscuous_disable(struct hash_rxq *hash_rxq)
 {
-	if (rxq->priv->vf)
+	if (hash_rxq->priv->vf)
 		return;
-	DEBUG("%p: disabling promiscuous mode", (void *)rxq);
-	if (rxq->promisc_flow == NULL)
+	DEBUG("%p: disabling promiscuous mode", (void *)hash_rxq);
+	if (hash_rxq->promisc_flow == NULL)
 		return;
-	claim_zero(ibv_destroy_flow(rxq->promisc_flow));
-	rxq->promisc_flow = NULL;
-	DEBUG("%p: promiscuous mode disabled", (void *)rxq);
+	claim_zero(ibv_destroy_flow(hash_rxq->promisc_flow));
+	hash_rxq->promisc_flow = NULL;
+	DEBUG("%p: promiscuous mode disabled", (void *)hash_rxq);
+}
+
+/**
+ * Disable promiscuous mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
+ */
+static void
+priv_promiscuous_disable(struct priv *priv)
+{
+	unsigned int i;
+
+	if (!priv->promisc)
+		return;
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_promiscuous_disable(&(*priv->hash_rxqs)[i]);
+	priv->promisc = 0;
 }
 
 /**
@@ -2377,15 +2718,15 @@ rxq_cleanup(struct rxq *rxq)
 		rxq_free_elts_sp(rxq);
 	else
 		rxq_free_elts(rxq);
-	if (rxq->if_qp != NULL) {
+	if (rxq->if_wq != NULL) {
 		assert(rxq->priv != NULL);
 		assert(rxq->priv->ctx != NULL);
-		assert(rxq->qp != NULL);
+		assert(rxq->wq != NULL);
 		params = (struct ibv_exp_release_intf_params){
 			.comp_mask = 0,
 		};
 		claim_zero(ibv_exp_release_intf(rxq->priv->ctx,
-						rxq->if_qp,
+						rxq->if_wq,
 						&params));
 	}
 	if (rxq->if_cq != NULL) {
@@ -2399,12 +2740,8 @@ rxq_cleanup(struct rxq *rxq)
 						rxq->if_cq,
 						&params));
 	}
-	if (rxq->qp != NULL) {
-		rxq_promiscuous_disable(rxq);
-		rxq_allmulticast_disable(rxq);
-		rxq_mac_addrs_del(rxq);
-		claim_zero(ibv_destroy_qp(rxq->qp));
-	}
+	if (rxq->wq != NULL)
+		claim_zero(ibv_exp_destroy_wq(rxq->wq));
 	if (rxq->cq != NULL)
 		claim_zero(ibv_destroy_cq(rxq->cq));
 	if (rxq->rd != NULL) {
@@ -2689,7 +3026,7 @@ mlx5_rx_burst_sp(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		rxq->stats.ibytes += pkt_buf_len;
 #endif
 repost:
-		ret = rxq->if_qp->recv_sg_list(rxq->qp,
+		ret = rxq->if_wq->recv_sg_list(rxq->wq,
 					       elt->sges,
 					       elemof(elt->sges));
 		if (unlikely(ret)) {
@@ -2849,7 +3186,7 @@ repost:
 #ifdef DEBUG_RECV
 	DEBUG("%p: reposting %u WRs", (void *)rxq, i);
 #endif
-	ret = rxq->if_qp->recv_burst(rxq->qp, sges, i);
+	ret = rxq->if_wq->recv_burst(rxq->wq, sges, i);
 	if (unlikely(ret)) {
 		/* Inability to repost WRs is fatal. */
 		DEBUG("%p: recv_burst(): failed (ret=%d)",
@@ -2864,112 +3201,6 @@ repost:
 #endif
 	return pkts_ret;
 }
-
-/**
- * Allocate a Queue Pair.
- * Optionally setup inline receive if supported.
- *
- * @param priv
- *   Pointer to private structure.
- * @param cq
- *   Completion queue to associate with QP.
- * @param desc
- *   Number of descriptors in QP (hint only).
- *
- * @return
- *   QP pointer or NULL in case of error.
- */
-static struct ibv_qp *
-rxq_setup_qp(struct priv *priv, struct ibv_cq *cq, uint16_t desc,
-	     struct ibv_exp_res_domain *rd)
-{
-	struct ibv_exp_qp_init_attr attr = {
-		/* CQ to be associated with the send queue. */
-		.send_cq = cq,
-		/* CQ to be associated with the receive queue. */
-		.recv_cq = cq,
-		.cap = {
-			/* Max number of outstanding WRs. */
-			.max_recv_wr = ((priv->device_attr.max_qp_wr < desc) ?
-					priv->device_attr.max_qp_wr :
-					desc),
-			/* Max number of scatter/gather elements in a WR. */
-			.max_recv_sge = ((priv->device_attr.max_sge <
-					  MLX5_PMD_SGE_WR_N) ?
-					 priv->device_attr.max_sge :
-					 MLX5_PMD_SGE_WR_N),
-		},
-		.qp_type = IBV_QPT_RAW_PACKET,
-		.comp_mask = (IBV_EXP_QP_INIT_ATTR_PD |
-			      IBV_EXP_QP_INIT_ATTR_RES_DOMAIN),
-		.pd = priv->pd,
-		.res_domain = rd,
-	};
-
-	return ibv_exp_create_qp(priv->ctx, &attr);
-}
-
-#ifdef RSS_SUPPORT
-
-/**
- * Allocate a RSS Queue Pair.
- * Optionally setup inline receive if supported.
- *
- * @param priv
- *   Pointer to private structure.
- * @param cq
- *   Completion queue to associate with QP.
- * @param desc
- *   Number of descriptors in QP (hint only).
- * @param parent
- *   If nonzero, create a parent QP, otherwise a child.
- *
- * @return
- *   QP pointer or NULL in case of error.
- */
-static struct ibv_qp *
-rxq_setup_qp_rss(struct priv *priv, struct ibv_cq *cq, uint16_t desc,
-		 int parent, struct ibv_exp_res_domain *rd)
-{
-	struct ibv_exp_qp_init_attr attr = {
-		/* CQ to be associated with the send queue. */
-		.send_cq = cq,
-		/* CQ to be associated with the receive queue. */
-		.recv_cq = cq,
-		.cap = {
-			/* Max number of outstanding WRs. */
-			.max_recv_wr = ((priv->device_attr.max_qp_wr < desc) ?
-					priv->device_attr.max_qp_wr :
-					desc),
-			/* Max number of scatter/gather elements in a WR. */
-			.max_recv_sge = ((priv->device_attr.max_sge <
-					  MLX5_PMD_SGE_WR_N) ?
-					 priv->device_attr.max_sge :
-					 MLX5_PMD_SGE_WR_N),
-		},
-		.qp_type = IBV_QPT_RAW_PACKET,
-		.comp_mask = (IBV_EXP_QP_INIT_ATTR_PD |
-			      IBV_EXP_QP_INIT_ATTR_RES_DOMAIN |
-			      IBV_EXP_QP_INIT_ATTR_QPG),
-		.pd = priv->pd,
-		.res_domain = rd,
-	};
-
-	if (parent) {
-		attr.qpg.qpg_type = IBV_EXP_QPG_PARENT;
-		/* TSS isn't necessary. */
-		attr.qpg.parent_attrib.tss_child_count = 0;
-		attr.qpg.parent_attrib.rss_child_count = priv->rxqs_n;
-		DEBUG("initializing parent RSS queue");
-	} else {
-		attr.qpg.qpg_type = IBV_EXP_QPG_CHILD_RX;
-		attr.qpg.qpg_parent = priv->rxq_parent.qp;
-		DEBUG("initializing child RSS queue");
-	}
-	return ibv_exp_create_qp(priv->ctx, &attr);
-}
-
-#endif /* RSS_SUPPORT */
 
 /**
  * Reconfigure a RX queue with new parameters.
@@ -2995,15 +3226,9 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	unsigned int desc_n;
 	struct rte_mbuf **pool;
 	unsigned int i, k;
-	struct ibv_exp_qp_attr mod;
+	struct ibv_exp_wq_attr mod;
 	int err;
-	int parent = (rxq == &priv->rxq_parent);
 
-	if (parent) {
-		ERROR("%p: cannot rehash parent queue %p",
-		      (void *)dev, (void *)rxq);
-		return EINVAL;
-	}
 	DEBUG("%p: rehashing queue %p", (void *)dev, (void *)rxq);
 	/* Number of descriptors and mbufs currently allocated. */
 	desc_n = (tmpl.elts_n * (tmpl.sp ? MLX5_PMD_SGE_WR_N : 1));
@@ -3032,24 +3257,15 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		DEBUG("%p: nothing to do", (void *)dev);
 		return 0;
 	}
-	/* Remove attached flows if RSS is disabled (no parent queue). */
-	if (!priv->rss) {
-		rxq_allmulticast_disable(&tmpl);
-		rxq_promiscuous_disable(&tmpl);
-		rxq_mac_addrs_del(&tmpl);
-		/* Update original queue in case of failure. */
-		rxq->allmulti_flow = tmpl.allmulti_flow;
-		rxq->promisc_flow = tmpl.promisc_flow;
-		memcpy(rxq->mac_configured, tmpl.mac_configured,
-		       sizeof(rxq->mac_configured));
-		memcpy(rxq->mac_flow, tmpl.mac_flow, sizeof(rxq->mac_flow));
-	}
 	/* From now on, any failure will render the queue unusable.
-	 * Reinitialize QP. */
-	mod = (struct ibv_exp_qp_attr){ .qp_state = IBV_QPS_RESET };
-	err = ibv_exp_modify_qp(tmpl.qp, &mod, IBV_EXP_QP_STATE);
+	 * Reinitialize WQ. */
+	mod = (struct ibv_exp_wq_attr){
+		.attr_mask = IBV_EXP_WQ_ATTR_STATE,
+		.wq_state = IBV_EXP_WQS_RESET,
+	};
+	err = ibv_exp_modify_wq(tmpl.wq, &mod);
 	if (err) {
-		ERROR("%p: cannot reset QP: %s", (void *)dev, strerror(err));
+		ERROR("%p: cannot reset WQ: %s", (void *)dev, strerror(err));
 		assert(err > 0);
 		return err;
 	}
@@ -3058,38 +3274,6 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		ERROR("%p: cannot resize CQ: %s", (void *)dev, strerror(err));
 		assert(err > 0);
 		return err;
-	}
-	mod = (struct ibv_exp_qp_attr){
-		/* Move the QP to this state. */
-		.qp_state = IBV_QPS_INIT,
-		/* Primary port number. */
-		.port_num = priv->port
-	};
-	err = ibv_exp_modify_qp(tmpl.qp, &mod,
-				(IBV_EXP_QP_STATE |
-#ifdef RSS_SUPPORT
-				 (parent ? IBV_EXP_QP_GROUP_RSS : 0) |
-#endif /* RSS_SUPPORT */
-				 IBV_EXP_QP_PORT));
-	if (err) {
-		ERROR("%p: QP state to IBV_QPS_INIT failed: %s",
-		      (void *)dev, strerror(err));
-		assert(err > 0);
-		return err;
-	};
-	/* Reconfigure flows. Do not care for errors. */
-	if (!priv->rss) {
-		rxq_mac_addrs_add(&tmpl);
-		if (priv->promisc)
-			rxq_promiscuous_enable(&tmpl);
-		if (priv->allmulti)
-			rxq_allmulticast_enable(&tmpl);
-		/* Update original queue in case of failure. */
-		rxq->allmulti_flow = tmpl.allmulti_flow;
-		rxq->promisc_flow = tmpl.promisc_flow;
-		memcpy(rxq->mac_configured, tmpl.mac_configured,
-		       sizeof(rxq->mac_configured));
-		memcpy(rxq->mac_flow, tmpl.mac_flow, sizeof(rxq->mac_flow));
 	}
 	/* Allocate pool. */
 	pool = rte_malloc(__func__, (mbuf_n * sizeof(*pool)), 0);
@@ -3142,13 +3326,13 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	rte_free(rxq->elts.sp);
 	rxq->elts.sp = NULL;
 	/* Post SGEs. */
-	assert(tmpl.if_qp != NULL);
+	assert(tmpl.if_wq != NULL);
 	if (tmpl.sp) {
 		struct rxq_elt_sp (*elts)[rxq->elts_n] = tmpl.elts.sp;
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
-			err = tmpl.if_qp->recv_sg_list
-				(tmpl.qp,
+			err = tmpl.if_wq->recv_sg_list
+				(tmpl.wq,
 				 (*elts)[i].sges,
 				 elemof((*elts)[i].sges));
 			if (err)
@@ -3158,8 +3342,8 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		struct rxq_elt (*elts)[rxq->elts_n] = tmpl.elts.no_sp;
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
-			err = tmpl.if_qp->recv_burst(
-				tmpl.qp,
+			err = tmpl.if_wq->recv_burst(
+				tmpl.wq,
 				&(*elts)[i].sge,
 				1);
 			if (err)
@@ -3171,16 +3355,17 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		      (void *)dev, err);
 		/* Set err because it does not contain a valid errno value. */
 		err = EIO;
-		goto skip_rtr;
+		goto skip_rdy;
 	}
-	mod = (struct ibv_exp_qp_attr){
-		.qp_state = IBV_QPS_RTR
+	mod = (struct ibv_exp_wq_attr){
+		.attr_mask = IBV_EXP_WQ_ATTR_STATE,
+		.wq_state = IBV_EXP_WQS_RDY,
 	};
-	err = ibv_exp_modify_qp(tmpl.qp, &mod, IBV_EXP_QP_STATE);
+	err = ibv_exp_modify_wq(tmpl.wq, &mod);
 	if (err)
-		ERROR("%p: QP state to IBV_QPS_RTR failed: %s",
+		ERROR("%p: WQ state to IBV_EXP_WQS_RDY failed: %s",
 		      (void *)dev, strerror(err));
-skip_rtr:
+skip_rdy:
 	*rxq = tmpl;
 	assert(err >= 0);
 	return err;
@@ -3216,30 +3401,19 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		.mp = mp,
 		.socket = socket
 	};
-	struct ibv_exp_qp_attr mod;
+	struct ibv_exp_wq_attr mod;
 	union {
 		struct ibv_exp_query_intf_params params;
 		struct ibv_exp_cq_init_attr cq;
 		struct ibv_exp_res_domain_init_attr rd;
+		struct ibv_exp_wq_init_attr wq;
 	} attr;
 	enum ibv_exp_query_intf_status status;
 	struct rte_mbuf *buf;
 	int ret = 0;
-	int parent = (rxq == &priv->rxq_parent);
 	unsigned int i;
 
 	(void)conf; /* Thresholds configuration (ignored). */
-	/*
-	 * If this is a parent queue, hardware must support RSS and
-	 * RSS must be enabled.
-	 */
-	assert((!parent) || ((priv->hw_rss) && (priv->rss)));
-	if (parent) {
-		/* Even if unused, ibv_create_cq() requires at least one
-		 * descriptor. */
-		desc = 1;
-		goto skip_mr;
-	}
 	if ((desc == 0) || (desc % MLX5_PMD_SGE_WR_N)) {
 		ERROR("%p: invalid number of RX descriptors (must be a"
 		      " multiple of %d)", (void *)dev, MLX5_PMD_SGE_WR_N);
@@ -3282,7 +3456,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-skip_mr:
 	attr.rd = (struct ibv_exp_res_domain_init_attr){
 		.comp_mask = (IBV_EXP_RES_DOMAIN_THREAD_MODEL |
 			      IBV_EXP_RES_DOMAIN_MSG_MODEL),
@@ -3311,48 +3484,29 @@ skip_mr:
 	      priv->device_attr.max_qp_wr);
 	DEBUG("priv->device_attr.max_sge is %d",
 	      priv->device_attr.max_sge);
-#ifdef RSS_SUPPORT
-	if (priv->rss)
-		tmpl.qp = rxq_setup_qp_rss(priv, tmpl.cq, desc, parent,
-					   tmpl.rd);
-	else
-#endif /* RSS_SUPPORT */
-		tmpl.qp = rxq_setup_qp(priv, tmpl.cq, desc, tmpl.rd);
-	if (tmpl.qp == NULL) {
-		ret = (errno ? errno : EINVAL);
-		ERROR("%p: QP creation failure: %s",
-		      (void *)dev, strerror(ret));
-		goto error;
-	}
-	mod = (struct ibv_exp_qp_attr){
-		/* Move the QP to this state. */
-		.qp_state = IBV_QPS_INIT,
-		/* Primary port number. */
-		.port_num = priv->port
+	attr.wq = (struct ibv_exp_wq_init_attr){
+		.wq_context = NULL, /* Could be useful in the future. */
+		.wq_type = IBV_EXP_WQT_RQ,
+		/* Max number of outstanding WRs. */
+		.max_recv_wr = ((priv->device_attr.max_qp_wr < desc) ?
+				priv->device_attr.max_qp_wr :
+				desc),
+		/* Max number of scatter/gather elements in a WR. */
+		.max_recv_sge = ((priv->device_attr.max_sge <
+				  MLX5_PMD_SGE_WR_N) ?
+				 priv->device_attr.max_sge :
+				 MLX5_PMD_SGE_WR_N),
+		.pd = priv->pd,
+		.cq = tmpl.cq,
+		.comp_mask = 0,
 	};
-	ret = ibv_exp_modify_qp(tmpl.qp, &mod,
-				(IBV_EXP_QP_STATE |
-#ifdef RSS_SUPPORT
-				 (parent ? IBV_EXP_QP_GROUP_RSS : 0) |
-#endif /* RSS_SUPPORT */
-				 IBV_EXP_QP_PORT));
-	if (ret) {
-		ERROR("%p: QP state to IBV_QPS_INIT failed: %s",
+	tmpl.wq = ibv_exp_create_wq(priv->ctx, &attr.wq);
+	if (tmpl.wq == NULL) {
+		ret = (errno ? errno : EINVAL);
+		ERROR("%p: WQ creation failure: %s",
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	if ((parent) || (!priv->rss))  {
-		/* Configure MAC and broadcast addresses. */
-		ret = rxq_mac_addrs_add(&tmpl);
-		if (ret) {
-			ERROR("%p: QP flow attachment failed: %s",
-			      (void *)dev, strerror(ret));
-			goto error;
-		}
-	}
-	/* Allocate descriptors for RX queues, except for the RSS parent. */
-	if (parent)
-		goto skip_alloc;
 	if (tmpl.sp)
 		ret = rxq_alloc_elts_sp(&tmpl, desc, NULL);
 	else
@@ -3362,7 +3516,6 @@ skip_mr:
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-skip_alloc:
 	/* Save port ID. */
 	tmpl.port_id = dev->data->port_id;
 	DEBUG("%p: RTE port ID: %u", (void *)rxq, tmpl.port_id);
@@ -3379,33 +3532,33 @@ skip_alloc:
 	}
 	attr.params = (struct ibv_exp_query_intf_params){
 		.intf_scope = IBV_EXP_INTF_GLOBAL,
-		.intf = IBV_EXP_INTF_QP_BURST,
-		.obj = tmpl.qp,
+		.intf = IBV_EXP_INTF_WQ,
+		.obj = tmpl.wq,
 	};
-	tmpl.if_qp = ibv_exp_query_intf(priv->ctx, &attr.params, &status);
-	if (tmpl.if_qp == NULL) {
-		ERROR("%p: QP interface family query failed with status %d",
+	tmpl.if_wq = ibv_exp_query_intf(priv->ctx, &attr.params, &status);
+	if (tmpl.if_wq == NULL) {
+		ERROR("%p: WQ interface family query failed with status %d",
 		      (void *)dev, status);
 		goto error;
 	}
 	/* Post SGEs. */
-	if (!parent && tmpl.sp) {
+	if (tmpl.sp) {
 		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
-			ret = tmpl.if_qp->recv_sg_list
-				(tmpl.qp,
+			ret = tmpl.if_wq->recv_sg_list
+				(tmpl.wq,
 				 (*elts)[i].sges,
 				 elemof((*elts)[i].sges));
 			if (ret)
 				break;
 		}
-	} else if (!parent) {
+	} else {
 		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
-			ret = tmpl.if_qp->recv_burst(
-				tmpl.qp,
+			ret = tmpl.if_wq->recv_burst(
+				tmpl.wq,
 				&(*elts)[i].sge,
 				1);
 			if (ret)
@@ -3419,12 +3572,13 @@ skip_alloc:
 		ret = EIO;
 		goto error;
 	}
-	mod = (struct ibv_exp_qp_attr){
-		.qp_state = IBV_QPS_RTR
+	mod = (struct ibv_exp_wq_attr){
+		.attr_mask = IBV_EXP_WQ_ATTR_STATE,
+		.wq_state = IBV_EXP_WQS_RDY,
 	};
-	ret = ibv_exp_modify_qp(tmpl.qp, &mod, IBV_EXP_QP_STATE);
+	ret = ibv_exp_modify_wq(tmpl.wq, &mod);
 	if (ret) {
-		ERROR("%p: QP state to IBV_QPS_RTR failed: %s",
+		ERROR("%p: WQ state to IBV_EXP_WQS_RDY failed: %s",
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
@@ -3531,7 +3685,6 @@ mlx5_rx_queue_release(void *dpdk_rxq)
 		return;
 	priv = rxq->priv;
 	priv_lock(priv);
-	assert(rxq != &priv->rxq_parent);
 	for (i = 0; (i != priv->rxqs_n); ++i)
 		if ((*priv->rxqs)[i] == rxq) {
 			DEBUG("%p: removing RX queue %p from list",
@@ -3559,54 +3712,35 @@ static int
 mlx5_dev_start(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i = 0;
-	unsigned int r;
-	struct rxq *rxq;
+	int err;
 
 	priv_lock(priv);
 	if (priv->started) {
 		priv_unlock(priv);
 		return 0;
 	}
-	DEBUG("%p: attaching configured flows to all RX queues", (void *)dev);
-	priv->started = 1;
-	if (priv->rss) {
-		rxq = &priv->rxq_parent;
-		r = 1;
-	} else {
-		rxq = (*priv->rxqs)[0];
-		r = priv->rxqs_n;
-	}
-	/* Iterate only once when RSS is enabled. */
-	do {
-		int ret;
-
-		/* Ignore nonexistent RX queues. */
-		if (rxq == NULL)
-			continue;
-		ret = rxq_mac_addrs_add(rxq);
-		if (!ret && priv->promisc)
-			ret = rxq_promiscuous_enable(rxq);
-		if (!ret && priv->allmulti)
-			ret = rxq_allmulticast_enable(rxq);
-		if (!ret)
-			continue;
-		WARN("%p: QP flow attachment failed: %s",
-		     (void *)dev, strerror(ret));
+	DEBUG("%p: allocating and configuring RX hash queues", (void *)dev);
+	err = priv_create_hash_rxqs(priv);
+	if (!err)
+		err = priv_mac_addrs_enable(priv);
+	if (!err && priv->promisc)
+		err = priv_promiscuous_enable(priv);
+	if (!err && priv->allmulti)
+		err = priv_allmulticast_enable(priv);
+	if (!err)
+		priv->started = 1;
+	else {
+		ERROR("%p: an error occured while configuring RX hash queues:"
+		      " %s",
+		      (void *)priv, strerror(err));
 		/* Rollback. */
-		while (i != 0) {
-			rxq = (*priv->rxqs)[--i];
-			if (rxq != NULL) {
-				rxq_allmulticast_disable(rxq);
-				rxq_promiscuous_disable(rxq);
-				rxq_mac_addrs_del(rxq);
-			}
-		}
-		priv->started = 0;
-		return -ret;
-	} while ((--r) && ((rxq = (*priv->rxqs)[++i]), i));
+		priv_allmulticast_disable(priv);
+		priv_promiscuous_disable(priv);
+		priv_mac_addrs_disable(priv);
+		priv_destroy_hash_rxqs(priv);
+	}
 	priv_unlock(priv);
-	return 0;
+	return -err;
 }
 
 /**
@@ -3621,33 +3755,18 @@ static void
 mlx5_dev_stop(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i = 0;
-	unsigned int r;
-	struct rxq *rxq;
 
 	priv_lock(priv);
 	if (!priv->started) {
 		priv_unlock(priv);
 		return;
 	}
-	DEBUG("%p: detaching flows from all RX queues", (void *)dev);
+	DEBUG("%p: cleaning up and destroying RX hash queues", (void *)dev);
+	priv_allmulticast_disable(priv);
+	priv_promiscuous_disable(priv);
+	priv_mac_addrs_disable(priv);
+	priv_destroy_hash_rxqs(priv);
 	priv->started = 0;
-	if (priv->rss) {
-		rxq = &priv->rxq_parent;
-		r = 1;
-	} else {
-		rxq = (*priv->rxqs)[0];
-		r = priv->rxqs_n;
-	}
-	/* Iterate only once when RSS is enabled. */
-	do {
-		/* Ignore nonexistent RX queues. */
-		if (rxq == NULL)
-			continue;
-		rxq_allmulticast_disable(rxq);
-		rxq_promiscuous_disable(rxq);
-		rxq_mac_addrs_del(rxq);
-	} while ((--r) && ((rxq = (*priv->rxqs)[++i]), i));
 	priv_unlock(priv);
 }
 
@@ -3720,6 +3839,13 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 	DEBUG("%p: closing device \"%s\"",
 	      (void *)dev,
 	      ((priv->ctx != NULL) ? priv->ctx->device->name : ""));
+	/* In case mlx5_dev_stop() has not been called. */
+	if (priv->started) {
+		priv_allmulticast_disable(priv);
+		priv_promiscuous_disable(priv);
+		priv_mac_addrs_disable(priv);
+		priv_destroy_hash_rxqs(priv);
+	}
 	/* Prevent crashes when queues are still in use. This is unfortunately
 	 * still required for DPDK 1.3 because some programs (such as testpmd)
 	 * never release them before closing the device. */
@@ -3753,8 +3879,6 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 		priv->txqs_n = 0;
 		priv->txqs = NULL;
 	}
-	if (priv->rss)
-		rxq_cleanup(&priv->rxq_parent);
 	if (priv->pd != NULL) {
 		assert(priv->ctx != NULL);
 		claim_zero(ibv_dealloc_pd(priv->pd));
@@ -3981,40 +4105,12 @@ static void
 mlx5_promiscuous_enable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 	int ret;
 
 	priv_lock(priv);
-	if (priv->promisc) {
-		priv_unlock(priv);
-		return;
-	}
-	/* If device isn't started, this is all we need to do. */
-	if (!priv->started)
-		goto end;
-	if (priv->rss) {
-		ret = rxq_promiscuous_enable(&priv->rxq_parent);
-		if (ret) {
-			priv_unlock(priv);
-			return;
-		}
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i) {
-		if ((*priv->rxqs)[i] == NULL)
-			continue;
-		ret = rxq_promiscuous_enable((*priv->rxqs)[i]);
-		if (!ret)
-			continue;
-		/* Failure, rollback. */
-		while (i != 0)
-			if ((*priv->rxqs)[--i] != NULL)
-				rxq_promiscuous_disable((*priv->rxqs)[i]);
-		priv_unlock(priv);
-		return;
-	}
-end:
-	priv->promisc = 1;
+	ret = priv_promiscuous_enable(priv);
+	if (ret)
+		ERROR("cannot enable promiscuous mode: %s", strerror(ret));
 	priv_unlock(priv);
 }
 
@@ -4028,22 +4124,9 @@ static void
 mlx5_promiscuous_disable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 
 	priv_lock(priv);
-	if (!priv->promisc) {
-		priv_unlock(priv);
-		return;
-	}
-	if (priv->rss) {
-		rxq_promiscuous_disable(&priv->rxq_parent);
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i)
-		if ((*priv->rxqs)[i] != NULL)
-			rxq_promiscuous_disable((*priv->rxqs)[i]);
-end:
-	priv->promisc = 0;
+	priv_promiscuous_disable(priv);
 	priv_unlock(priv);
 }
 
@@ -4057,40 +4140,12 @@ static void
 mlx5_allmulticast_enable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 	int ret;
 
 	priv_lock(priv);
-	if (priv->allmulti) {
-		priv_unlock(priv);
-		return;
-	}
-	/* If device isn't started, this is all we need to do. */
-	if (!priv->started)
-		goto end;
-	if (priv->rss) {
-		ret = rxq_allmulticast_enable(&priv->rxq_parent);
-		if (ret) {
-			priv_unlock(priv);
-			return;
-		}
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i) {
-		if ((*priv->rxqs)[i] == NULL)
-			continue;
-		ret = rxq_allmulticast_enable((*priv->rxqs)[i]);
-		if (!ret)
-			continue;
-		/* Failure, rollback. */
-		while (i != 0)
-			if ((*priv->rxqs)[--i] != NULL)
-				rxq_allmulticast_disable((*priv->rxqs)[i]);
-		priv_unlock(priv);
-		return;
-	}
-end:
-	priv->allmulti = 1;
+	ret = priv_allmulticast_enable(priv);
+	if (ret)
+		ERROR("cannot enable allmulticast mode: %s", strerror(ret));
 	priv_unlock(priv);
 }
 
@@ -4104,22 +4159,9 @@ static void
 mlx5_allmulticast_disable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 
 	priv_lock(priv);
-	if (!priv->allmulti) {
-		priv_unlock(priv);
-		return;
-	}
-	if (priv->rss) {
-		rxq_allmulticast_disable(&priv->rxq_parent);
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i)
-		if ((*priv->rxqs)[i] != NULL)
-			rxq_allmulticast_disable((*priv->rxqs)[i]);
-end:
-	priv->allmulti = 0;
+	priv_allmulticast_disable(priv);
 	priv_unlock(priv);
 }
 
@@ -4257,15 +4299,6 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 			if (rxq->sp)
 				rx_func = mlx5_rx_burst_sp;
 			break;
-		}
-		/* Reenable non-RSS queue attributes. No need to check
-		 * for errors at this stage. */
-		if (!priv->rss) {
-			rxq_mac_addrs_add(rxq);
-			if (priv->promisc)
-				rxq_promiscuous_enable(rxq);
-			if (priv->allmulti)
-				rxq_allmulticast_enable(rxq);
 		}
 		/* Scattered burst function takes priority. */
 		if (rxq->sp)
@@ -4424,47 +4457,25 @@ vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 	if ((on) && (!priv->vlan_filter[j].enabled)) {
 		/*
 		 * Filter is disabled, enable it.
-		 * Rehashing flows in all RX queues is necessary.
+		 * Rehashing flows in all RX hash queues is necessary.
 		 */
-		if (priv->rss)
-			rxq_mac_addrs_del(&priv->rxq_parent);
-		else
-			for (i = 0; (i != priv->rxqs_n); ++i)
-				if ((*priv->rxqs)[i] != NULL)
-					rxq_mac_addrs_del((*priv->rxqs)[i]);
+		for (i = 0; (i != priv->hash_rxqs_n); ++i)
+			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);
 		priv->vlan_filter[j].enabled = 1;
-		if (priv->started) {
-			if (priv->rss)
-				rxq_mac_addrs_add(&priv->rxq_parent);
-			else
-				for (i = 0; (i != priv->rxqs_n); ++i) {
-					if ((*priv->rxqs)[i] == NULL)
-						continue;
-					rxq_mac_addrs_add((*priv->rxqs)[i]);
-				}
-		}
+		if (priv->started)
+			for (i = 0; (i != priv->hash_rxqs_n); ++i)
+				hash_rxq_mac_addrs_add(&(*priv->hash_rxqs)[i]);
 	} else if ((!on) && (priv->vlan_filter[j].enabled)) {
 		/*
 		 * Filter is enabled, disable it.
 		 * Rehashing flows in all RX queues is necessary.
 		 */
-		if (priv->rss)
-			rxq_mac_addrs_del(&priv->rxq_parent);
-		else
-			for (i = 0; (i != priv->rxqs_n); ++i)
-				if ((*priv->rxqs)[i] != NULL)
-					rxq_mac_addrs_del((*priv->rxqs)[i]);
+		for (i = 0; (i != priv->hash_rxqs_n); ++i)
+			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);
 		priv->vlan_filter[j].enabled = 0;
-		if (priv->started) {
-			if (priv->rss)
-				rxq_mac_addrs_add(&priv->rxq_parent);
-			else
-				for (i = 0; (i != priv->rxqs_n); ++i) {
-					if ((*priv->rxqs)[i] == NULL)
-						continue;
-					rxq_mac_addrs_add((*priv->rxqs)[i]);
-				}
-		}
+		if (priv->started)
+			for (i = 0; (i != priv->hash_rxqs_n); ++i)
+				hash_rxq_mac_addrs_add(&(*priv->hash_rxqs)[i]);
 	}
 	return 0;
 }
@@ -4772,9 +4783,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 
 #ifdef HAVE_EXP_QUERY_DEVICE
 		exp_device_attr.comp_mask = IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS;
-#ifdef RSS_SUPPORT
 		exp_device_attr.comp_mask |= IBV_EXP_DEVICE_ATTR_RSS_TBL_SZ;
-#endif /* RSS_SUPPORT */
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
 		DEBUG("using port %u (%08" PRIx32 ")", port, test);
@@ -4824,7 +4833,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 			ERROR("ibv_exp_query_device() failed");
 			goto port_error;
 		}
-#ifdef RSS_SUPPORT
 		if ((exp_device_attr.exp_device_cap_flags &
 		     IBV_EXP_DEVICE_QPG) &&
 		    (exp_device_attr.exp_device_cap_flags &
@@ -4849,7 +4857,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		if (priv->hw_rss)
 			DEBUG("maximum RSS indirection table size: %u",
 			      exp_device_attr.max_rss_tbl_sz);
-#endif /* RSS_SUPPORT */
 
 		priv->hw_csum =
 			((exp_device_attr.exp_device_cap_flags &

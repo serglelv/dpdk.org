@@ -100,10 +100,6 @@ endif
 mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 	$Q $(RM) -f -- '$@'
 	$Q sh -- '$<' '$@' \
-		RSS_SUPPORT \
-		infiniband/verbs.h \
-		enum IBV_EXP_DEVICE_UD_RSS $(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
 		HAVE_EXP_QUERY_DEVICE \
 		infiniband/verbs.h \
 		type 'struct ibv_exp_device_attr' $(AUTOCONF_OUTPUT)
