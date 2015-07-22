@@ -60,54 +60,35 @@ int
 mlx5_dev_start(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i = 0;
-	unsigned int r;
-	struct rxq *rxq;
+	int err;
 
 	priv_lock(priv);
 	if (priv->started) {
 		priv_unlock(priv);
 		return 0;
 	}
-	DEBUG("%p: attaching configured flows to all RX queues", (void *)dev);
-	priv->started = 1;
-	if (priv->rss) {
-		rxq = &priv->rxq_parent;
-		r = 1;
-	} else {
-		rxq = (*priv->rxqs)[0];
-		r = priv->rxqs_n;
-	}
-	/* Iterate only once when RSS is enabled. */
-	do {
-		int ret;
-
-		/* Ignore nonexistent RX queues. */
-		if (rxq == NULL)
-			continue;
-		ret = rxq_mac_addrs_add(rxq);
-		if (!ret && priv->promisc)
-			ret = rxq_promiscuous_enable(rxq);
-		if (!ret && priv->allmulti)
-			ret = rxq_allmulticast_enable(rxq);
-		if (!ret)
-			continue;
-		WARN("%p: QP flow attachment failed: %s",
-		     (void *)dev, strerror(ret));
+	DEBUG("%p: allocating and configuring RX hash queues", (void *)dev);
+	err = priv_create_hash_rxqs(priv);
+	if (!err)
+		err = priv_mac_addrs_enable(priv);
+	if (!err && priv->promisc)
+		err = priv_promiscuous_enable(priv);
+	if (!err && priv->allmulti)
+		err = priv_allmulticast_enable(priv);
+	if (!err)
+		priv->started = 1;
+	else {
+		ERROR("%p: an error occured while configuring RX hash queues:"
+		      " %s",
+		      (void *)priv, strerror(err));
 		/* Rollback. */
-		while (i != 0) {
-			rxq = (*priv->rxqs)[--i];
-			if (rxq != NULL) {
-				rxq_allmulticast_disable(rxq);
-				rxq_promiscuous_disable(rxq);
-				rxq_mac_addrs_del(rxq);
-			}
-		}
-		priv->started = 0;
-		return -ret;
-	} while ((--r) && ((rxq = (*priv->rxqs)[++i]), i));
+		priv_allmulticast_disable(priv);
+		priv_promiscuous_disable(priv);
+		priv_mac_addrs_disable(priv);
+		priv_destroy_hash_rxqs(priv);
+	}
 	priv_unlock(priv);
-	return 0;
+	return -err;
 }
 
 /**
@@ -122,32 +103,17 @@ void
 mlx5_dev_stop(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i = 0;
-	unsigned int r;
-	struct rxq *rxq;
 
 	priv_lock(priv);
 	if (!priv->started) {
 		priv_unlock(priv);
 		return;
 	}
-	DEBUG("%p: detaching flows from all RX queues", (void *)dev);
+	DEBUG("%p: cleaning up and destroying RX hash queues", (void *)dev);
+	priv_allmulticast_disable(priv);
+	priv_promiscuous_disable(priv);
+	priv_mac_addrs_disable(priv);
+	priv_destroy_hash_rxqs(priv);
 	priv->started = 0;
-	if (priv->rss) {
-		rxq = &priv->rxq_parent;
-		r = 1;
-	} else {
-		rxq = (*priv->rxqs)[0];
-		r = priv->rxqs_n;
-	}
-	/* Iterate only once when RSS is enabled. */
-	do {
-		/* Ignore nonexistent RX queues. */
-		if (rxq == NULL)
-			continue;
-		rxq_allmulticast_disable(rxq);
-		rxq_promiscuous_disable(rxq);
-		rxq_mac_addrs_del(rxq);
-	} while ((--r) && ((rxq = (*priv->rxqs)[++i]), i));
 	priv_unlock(priv);
 }

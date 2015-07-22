@@ -93,47 +93,25 @@ vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 	if ((on) && (!priv->vlan_filter[j].enabled)) {
 		/*
 		 * Filter is disabled, enable it.
-		 * Rehashing flows in all RX queues is necessary.
+		 * Rehashing flows in all RX hash queues is necessary.
 		 */
-		if (priv->rss)
-			rxq_mac_addrs_del(&priv->rxq_parent);
-		else
-			for (i = 0; (i != priv->rxqs_n); ++i)
-				if ((*priv->rxqs)[i] != NULL)
-					rxq_mac_addrs_del((*priv->rxqs)[i]);
+		for (i = 0; (i != priv->hash_rxqs_n); ++i)
+			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);
 		priv->vlan_filter[j].enabled = 1;
-		if (priv->started) {
-			if (priv->rss)
-				rxq_mac_addrs_add(&priv->rxq_parent);
-			else
-				for (i = 0; (i != priv->rxqs_n); ++i) {
-					if ((*priv->rxqs)[i] == NULL)
-						continue;
-					rxq_mac_addrs_add((*priv->rxqs)[i]);
-				}
-		}
+		if (priv->started)
+			for (i = 0; (i != priv->hash_rxqs_n); ++i)
+				hash_rxq_mac_addrs_add(&(*priv->hash_rxqs)[i]);
 	} else if ((!on) && (priv->vlan_filter[j].enabled)) {
 		/*
 		 * Filter is enabled, disable it.
 		 * Rehashing flows in all RX queues is necessary.
 		 */
-		if (priv->rss)
-			rxq_mac_addrs_del(&priv->rxq_parent);
-		else
-			for (i = 0; (i != priv->rxqs_n); ++i)
-				if ((*priv->rxqs)[i] != NULL)
-					rxq_mac_addrs_del((*priv->rxqs)[i]);
+		for (i = 0; (i != priv->hash_rxqs_n); ++i)
+			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);
 		priv->vlan_filter[j].enabled = 0;
-		if (priv->started) {
-			if (priv->rss)
-				rxq_mac_addrs_add(&priv->rxq_parent);
-			else
-				for (i = 0; (i != priv->rxqs_n); ++i) {
-					if ((*priv->rxqs)[i] == NULL)
-						continue;
-					rxq_mac_addrs_add((*priv->rxqs)[i]);
-				}
-		}
+		if (priv->started)
+			for (i = 0; (i != priv->hash_rxqs_n); ++i)
+				hash_rxq_mac_addrs_add(&(*priv->hash_rxqs)[i]);
 	}
 	return 0;
 }

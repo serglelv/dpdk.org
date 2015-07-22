@@ -92,83 +92,84 @@ priv_get_mac(struct priv *priv, uint8_t (*mac)[ETHER_ADDR_LEN])
 /**
  * Delete flow steering rule.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index.
  * @param vlan_index
  *   VLAN index.
  */
 static void
-rxq_del_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
+hash_rxq_del_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
+		  unsigned int vlan_index)
 {
 #ifndef NDEBUG
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 		(const uint8_t (*)[ETHER_ADDR_LEN])
 		priv->mac[mac_index].addr_bytes;
 #endif
-	assert(rxq->mac_flow[mac_index][vlan_index] != NULL);
+	assert(hash_rxq->mac_flow[mac_index][vlan_index] != NULL);
 	DEBUG("%p: removing MAC address %02x:%02x:%02x:%02x:%02x:%02x index %u"
 	      " (VLAN ID %" PRIu16 ")",
-	      (void *)rxq,
+	      (void *)hash_rxq,
 	      (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5],
 	      mac_index, priv->vlan_filter[vlan_index].id);
-	claim_zero(ibv_destroy_flow(rxq->mac_flow[mac_index][vlan_index]));
-	rxq->mac_flow[mac_index][vlan_index] = NULL;
+	claim_zero(ibv_destroy_flow(hash_rxq->mac_flow
+				    [mac_index][vlan_index]));
+	hash_rxq->mac_flow[mac_index][vlan_index] = NULL;
 }
 
 /**
- * Unregister a MAC address from a RX queue.
+ * Unregister a MAC address from a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index.
  */
 static void
-rxq_mac_addr_del(struct rxq *rxq, unsigned int mac_index)
+hash_rxq_mac_addr_del(struct hash_rxq *hash_rxq, unsigned int mac_index)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 	unsigned int vlans = 0;
 
 	assert(mac_index < elemof(priv->mac));
-	if (!BITFIELD_ISSET(rxq->mac_configured, mac_index))
+	if (!BITFIELD_ISSET(hash_rxq->mac_configured, mac_index))
 		return;
 	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled)
 			continue;
-		rxq_del_flow(rxq, mac_index, i);
+		hash_rxq_del_flow(hash_rxq, mac_index, i);
 		vlans++;
 	}
 	if (!vlans) {
-		rxq_del_flow(rxq, mac_index, 0);
+		hash_rxq_del_flow(hash_rxq, mac_index, 0);
 	}
-	BITFIELD_RESET(rxq->mac_configured, mac_index);
+	BITFIELD_RESET(hash_rxq->mac_configured, mac_index);
 }
 
 /**
- * Unregister all MAC addresses from a RX queue.
+ * Unregister all MAC addresses from a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  */
 void
-rxq_mac_addrs_del(struct rxq *rxq)
+hash_rxq_mac_addrs_del(struct hash_rxq *hash_rxq)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 
 	for (i = 0; (i != elemof(priv->mac)); ++i)
-		rxq_mac_addr_del(rxq, i);
+		hash_rxq_mac_addr_del(hash_rxq, i);
 }
 
 /**
  * Unregister a MAC address.
  *
- * In RSS mode, the MAC address is unregistered from the parent queue,
- * otherwise it is unregistered from each queue directly.
+ * This is done for each RX hash queue.
  *
  * @param priv
  *   Pointer to private structure.
@@ -183,14 +184,24 @@ priv_mac_addr_del(struct priv *priv, unsigned int mac_index)
 	assert(mac_index < elemof(priv->mac));
 	if (!BITFIELD_ISSET(priv->mac_configured, mac_index))
 		return;
-	if (priv->rss) {
-		rxq_mac_addr_del(&priv->rxq_parent, mac_index);
-		goto end;
-	}
-	for (i = 0; (i != priv->dev->data->nb_rx_queues); ++i)
-		rxq_mac_addr_del((*priv->rxqs)[i], mac_index);
-end:
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_mac_addr_del(&(*priv->hash_rxqs)[i], mac_index);
 	BITFIELD_RESET(priv->mac_configured, mac_index);
+}
+
+/**
+ * Unregister all MAC addresses from all RX hash queues.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ */
+void
+priv_mac_addrs_disable(struct priv *priv)
+{
+	unsigned int i;
+
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);
 }
 
 /**
@@ -223,8 +234,8 @@ end:
 /**
  * Add single flow steering rule.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index to register.
  * @param vlan_index
@@ -234,10 +245,11 @@ end:
  *   0 on success, errno value on failure.
  */
 static int
-rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
+hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
+		  unsigned int vlan_index)
 {
 	struct ibv_flow *flow;
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 			(const uint8_t (*)[ETHER_ADDR_LEN])
 			priv->mac[mac_index].addr_bytes;
@@ -282,18 +294,18 @@ rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
 	};
 	DEBUG("%p: adding MAC address %02x:%02x:%02x:%02x:%02x:%02x index %u"
 	      " (VLAN %s %" PRIu16 ")",
-	      (void *)rxq,
+	      (void *)hash_rxq,
 	      (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5],
 	      mac_index,
 	      ((vlan_index != -1u) ? "ID" : "index"),
 	      ((vlan_index != -1u) ? priv->vlan_filter[vlan_index].id : -1u));
 	/* Create related flow. */
 	errno = 0;
-	flow = ibv_create_flow(rxq->qp, attr);
+	flow = ibv_create_flow(hash_rxq->qp, attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
-		      (void *)rxq, errno,
+		      (void *)hash_rxq, errno,
 		      (errno ? strerror(errno) : "Unknown error"));
 		if (errno)
 			return errno;
@@ -301,16 +313,16 @@ rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
 	}
 	if (vlan_index == -1u)
 		vlan_index = 0;
-	assert(rxq->mac_flow[mac_index][vlan_index] == NULL);
-	rxq->mac_flow[mac_index][vlan_index] = flow;
+	assert(hash_rxq->mac_flow[mac_index][vlan_index] == NULL);
+	hash_rxq->mac_flow[mac_index][vlan_index] = flow;
 	return 0;
 }
 
 /**
- * Register a MAC address in a RX queue.
+ * Register a MAC address in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  * @param mac_index
  *   MAC address index to register.
  *
@@ -318,22 +330,22 @@ rxq_add_flow(struct rxq *rxq, unsigned int mac_index, unsigned int vlan_index)
  *   0 on success, errno value on failure.
  */
 static int
-rxq_mac_addr_add(struct rxq *rxq, unsigned int mac_index)
+hash_rxq_mac_addr_add(struct hash_rxq *hash_rxq, unsigned int mac_index)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 	unsigned int vlans = 0;
 	int ret;
 
 	assert(mac_index < elemof(priv->mac));
-	if (BITFIELD_ISSET(rxq->mac_configured, mac_index))
-		rxq_mac_addr_del(rxq, mac_index);
+	if (BITFIELD_ISSET(hash_rxq->mac_configured, mac_index))
+		hash_rxq_mac_addr_del(hash_rxq, mac_index);
 	/* Fill VLAN specifications. */
 	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled)
 			continue;
 		/* Create related flow. */
-		ret = rxq_add_flow(rxq, mac_index, i);
+		ret = hash_rxq_add_flow(hash_rxq, mac_index, i);
 		if (!ret) {
 			vlans++;
 			continue;
@@ -341,45 +353,45 @@ rxq_mac_addr_add(struct rxq *rxq, unsigned int mac_index)
 		/* Failure, rollback. */
 		while (i != 0)
 			if (priv->vlan_filter[--i].enabled)
-				rxq_del_flow(rxq, mac_index, i);
+				hash_rxq_del_flow(hash_rxq, mac_index, i);
 		assert(ret > 0);
 		return ret;
 	}
 	/* In case there is no VLAN filter. */
 	if (!vlans) {
-		ret = rxq_add_flow(rxq, mac_index, -1);
+		ret = hash_rxq_add_flow(hash_rxq, mac_index, -1);
 		if (ret)
 			return ret;
 	}
-	BITFIELD_SET(rxq->mac_configured, mac_index);
+	BITFIELD_SET(hash_rxq->mac_configured, mac_index);
 	return 0;
 }
 
 /**
- * Register all MAC addresses in a RX queue.
+ * Register all MAC addresses in a RX hash queue.
  *
- * @param rxq
+ * @param hash_rxq
  *   Pointer to RX queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
  */
 int
-rxq_mac_addrs_add(struct rxq *rxq)
+hash_rxq_mac_addrs_add(struct hash_rxq *hash_rxq)
 {
-	struct priv *priv = rxq->priv;
+	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 	int ret;
 
 	for (i = 0; (i != elemof(priv->mac)); ++i) {
 		if (!BITFIELD_ISSET(priv->mac_configured, i))
 			continue;
-		ret = rxq_mac_addr_add(rxq, i);
+		ret = hash_rxq_mac_addr_add(hash_rxq, i);
 		if (!ret)
 			continue;
 		/* Failure, rollback. */
 		while (i != 0)
-			rxq_mac_addr_del(rxq, --i);
+			hash_rxq_mac_addr_del(hash_rxq, --i);
 		assert(ret > 0);
 		return ret;
 	}
@@ -389,8 +401,7 @@ rxq_mac_addrs_add(struct rxq *rxq)
 /**
  * Register a MAC address.
  *
- * In RSS mode, the MAC address is registered in the parent queue,
- * otherwise it is registered in each queue directly.
+ * This is done for each RX hash queue.
  *
  * @param priv
  *   Pointer to private structure.
@@ -433,36 +444,55 @@ priv_mac_addr_add(struct priv *priv, unsigned int mac_index,
 	/* If device isn't started, this is all we need to do. */
 	if (!priv->started) {
 #ifndef NDEBUG
-		/* Verify that all queues have this index disabled. */
-		for (i = 0; (i != priv->rxqs_n); ++i) {
-			if ((*priv->rxqs)[i] == NULL)
-				continue;
+		/* Verify that all RX hash queues have this index disabled. */
+		for (i = 0; (i != priv->hash_rxqs_n); ++i) {
 			assert(!BITFIELD_ISSET
-			       ((*priv->rxqs)[i]->mac_configured, mac_index));
+			       ((*priv->hash_rxqs)[i].mac_configured,
+				mac_index));
 		}
 #endif
 		goto end;
 	}
-	if (priv->rss) {
-		ret = rxq_mac_addr_add(&priv->rxq_parent, mac_index);
-		if (ret)
-			return ret;
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i) {
-		if ((*priv->rxqs)[i] == NULL)
-			continue;
-		ret = rxq_mac_addr_add((*priv->rxqs)[i], mac_index);
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		ret = hash_rxq_mac_addr_add(&(*priv->hash_rxqs)[i], mac_index);
 		if (!ret)
 			continue;
 		/* Failure, rollback. */
 		while (i != 0)
-			if ((*priv->rxqs)[(--i)] != NULL)
-				rxq_mac_addr_del((*priv->rxqs)[i], mac_index);
+			hash_rxq_mac_addr_del(&(*priv->hash_rxqs)[--i],
+					      mac_index);
 		return ret;
 	}
 end:
 	BITFIELD_SET(priv->mac_configured, mac_index);
+	return 0;
+}
+
+/**
+ * Register all MAC addresses in all RX hash queues.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+int
+priv_mac_addrs_enable(struct priv *priv)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		ret = hash_rxq_mac_addrs_add(&(*priv->hash_rxqs)[i]);
+		if (!ret)
+			continue;
+		/* Failure, rollback. */
+		while (i != 0)
+			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[--i]);
+		assert(ret > 0);
+		return ret;
+	}
 	return 0;
 }
 

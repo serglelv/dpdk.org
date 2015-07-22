@@ -90,6 +90,13 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 	DEBUG("%p: closing device \"%s\"",
 	      (void *)dev,
 	      ((priv->ctx != NULL) ? priv->ctx->device->name : ""));
+	/* In case mlx5_dev_stop() has not been called. */
+	if (priv->started) {
+		priv_allmulticast_disable(priv);
+		priv_promiscuous_disable(priv);
+		priv_mac_addrs_disable(priv);
+		priv_destroy_hash_rxqs(priv);
+	}
 	/* Prevent crashes when queues are still in use. This is unfortunately
 	 * still required for DPDK 1.3 because some programs (such as testpmd)
 	 * never release them before closing the device. */
@@ -123,8 +130,6 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 		priv->txqs_n = 0;
 		priv->txqs = NULL;
 	}
-	if (priv->rss)
-		rxq_cleanup(&priv->rxq_parent);
 	if (priv->pd != NULL) {
 		assert(priv->ctx != NULL);
 		claim_zero(ibv_dealloc_pd(priv->pd));
@@ -320,9 +325,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 
 #ifdef HAVE_EXP_QUERY_DEVICE
 		exp_device_attr.comp_mask = IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS;
-#ifdef RSS_SUPPORT
 		exp_device_attr.comp_mask |= IBV_EXP_DEVICE_ATTR_RSS_TBL_SZ;
-#endif /* RSS_SUPPORT */
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
 		DEBUG("using port %u (%08" PRIx32 ")", port, test);
@@ -372,7 +375,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 			ERROR("ibv_exp_query_device() failed");
 			goto port_error;
 		}
-#ifdef RSS_SUPPORT
 		if ((exp_device_attr.exp_device_cap_flags &
 		     IBV_EXP_DEVICE_QPG) &&
 		    (exp_device_attr.exp_device_cap_flags &
@@ -397,7 +399,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		if (priv->hw_rss)
 			DEBUG("maximum RSS indirection table size: %u",
 			      exp_device_attr.max_rss_tbl_sz);
-#endif /* RSS_SUPPORT */
 
 		priv->hw_csum =
 			((exp_device_attr.exp_device_cap_flags &

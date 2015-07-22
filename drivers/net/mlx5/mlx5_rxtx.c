@@ -771,7 +771,7 @@ mlx5_rx_burst_sp(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		rxq->stats.ibytes += pkt_buf_len;
 #endif
 repost:
-		ret = rxq->if_qp->recv_sg_list(rxq->qp,
+		ret = rxq->if_wq->recv_sg_list(rxq->wq,
 					       elt->sges,
 					       elemof(elt->sges));
 		if (unlikely(ret)) {
@@ -931,7 +931,7 @@ repost:
 #ifdef DEBUG_RECV
 	DEBUG("%p: reposting %u WRs", (void *)rxq, i);
 #endif
-	ret = rxq->if_qp->recv_burst(rxq->qp, sges, i);
+	ret = rxq->if_wq->recv_burst(rxq->wq, sges, i);
 	if (unlikely(ret)) {
 		/* Inability to repost WRs is fatal. */
 		DEBUG("%p: recv_burst(): failed (ret=%d)",

@@ -108,15 +108,18 @@ struct priv {
 	unsigned int hw_rss:1; /* RSS is supported. */
 	unsigned int hw_csum:1; /* Checksum offload is supported. */
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
-	unsigned int rss:1; /* RSS is enabled. */
 	unsigned int vf:1; /* This is a VF device. */
 	unsigned int max_rss_tbl_sz; /* Maximum number of RSS queues. */
 	/* RX/TX queues. */
-	struct rxq rxq_parent; /* Parent queue when RSS is enabled. */
 	unsigned int rxqs_n; /* RX queues array size. */
 	unsigned int txqs_n; /* TX queues array size. */
 	struct rxq *(*rxqs)[]; /* RX queues. */
 	struct txq *(*txqs)[]; /* TX queues. */
+	/* Indirection table referencing all RX WQs. */
+	struct ibv_exp_rwq_ind_table *ind_table;
+	/* RX hash QPs that feed the indirection table. */
+	struct hash_rxq (*hash_rxqs)[];
+	unsigned int hash_rxqs_n; /* RX hash QPs array size. */
 	rte_spinlock_t lock; /* Lock for control functions. */
 };
 
@@ -164,11 +167,13 @@ int mlx5_getenv_int(const char *);
 /* mlx5_mac.c */
 
 int priv_get_mac(struct priv *, uint8_t (*)[ETHER_ADDR_LEN]);
-void rxq_mac_addrs_del(struct rxq *);
+void hash_rxq_mac_addrs_del(struct hash_rxq *);
+void priv_mac_addrs_disable(struct priv *);
 void mlx5_mac_addr_remove(struct rte_eth_dev *, uint32_t);
-int rxq_mac_addrs_add(struct rxq *);
+int hash_rxq_mac_addrs_add(struct hash_rxq *);
 int priv_mac_addr_add(struct priv *, unsigned int,
 		      const uint8_t (*)[ETHER_ADDR_LEN]);
+int priv_mac_addrs_enable(struct priv *);
 void mlx5_mac_addr_add(struct rte_eth_dev *, struct ether_addr *, uint32_t,
 		       uint32_t);
 
@@ -179,13 +184,13 @@ void mlx5_dev_stop(struct rte_eth_dev *);
 
 /* mlx5_rxmode.c */
 
-int rxq_promiscuous_enable(struct rxq *);
+int priv_promiscuous_enable(struct priv *);
 void mlx5_promiscuous_enable(struct rte_eth_dev *);
-void rxq_promiscuous_disable(struct rxq *);
+void priv_promiscuous_disable(struct priv *);
 void mlx5_promiscuous_disable(struct rte_eth_dev *);
-int rxq_allmulticast_enable(struct rxq *);
+int priv_allmulticast_enable(struct priv *);
 void mlx5_allmulticast_enable(struct rte_eth_dev *);
-void rxq_allmulticast_disable(struct rxq *);
+void priv_allmulticast_disable(struct priv *);
 void mlx5_allmulticast_disable(struct rte_eth_dev *);
 
 /* mlx5_stats.c */

@@ -58,44 +58,85 @@
 #include "mlx5_rxtx.h"
 #include "mlx5_utils.h"
 
+static void hash_rxq_promiscuous_disable(struct hash_rxq *);
+static void hash_rxq_allmulticast_disable(struct hash_rxq *);
+
 /**
- * Enable promiscuous mode in a RX queue.
+ * Enable promiscuous mode in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
  */
-int
-rxq_promiscuous_enable(struct rxq *rxq)
+static int
+hash_rxq_promiscuous_enable(struct hash_rxq *hash_rxq)
 {
 	struct ibv_flow *flow;
 	struct ibv_flow_attr attr = {
 		.type = IBV_FLOW_ATTR_ALL_DEFAULT,
 		.num_of_specs = 0,
-		.port = rxq->priv->port,
+		.port = hash_rxq->priv->port,
 		.flags = 0
 	};
 
-	if (rxq->priv->vf)
+	if (hash_rxq->priv->vf)
 		return 0;
-	DEBUG("%p: enabling promiscuous mode", (void *)rxq);
-	if (rxq->promisc_flow != NULL)
+	DEBUG("%p: enabling promiscuous mode", (void *)hash_rxq);
+	if (hash_rxq->promisc_flow != NULL)
 		return EBUSY;
 	errno = 0;
-	flow = ibv_create_flow(rxq->qp, &attr);
+	flow = ibv_create_flow(hash_rxq->qp, &attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
-		      (void *)rxq, errno,
+		      (void *)hash_rxq, errno,
 		      (errno ? strerror(errno) : "Unknown error"));
 		if (errno)
 			return errno;
 		return EINVAL;
 	}
-	rxq->promisc_flow = flow;
-	DEBUG("%p: promiscuous mode enabled", (void *)rxq);
+	hash_rxq->promisc_flow = flow;
+	DEBUG("%p: promiscuous mode enabled", (void *)hash_rxq);
+	return 0;
+}
+
+/**
+ * Enable promiscuous mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+int
+priv_promiscuous_enable(struct priv *priv)
+{
+	unsigned int i;
+
+	if (priv->promisc)
+		return 0;
+	/* If device isn't started, this is all we need to do. */
+	if (!priv->started)
+		goto end;
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
+		int ret;
+
+		ret = hash_rxq_promiscuous_enable(hash_rxq);
+		if (!ret)
+			continue;
+		/* Failure, rollback. */
+		while (i != 0) {
+			hash_rxq = &(*priv->hash_rxqs)[--i];
+			hash_rxq_promiscuous_disable(hash_rxq);
+		}
+		return ret;
+	}
+end:
+	priv->promisc = 1;
 	return 0;
 }
 
@@ -109,60 +150,50 @@ void
 mlx5_promiscuous_enable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 	int ret;
 
 	priv_lock(priv);
-	if (priv->promisc) {
-		priv_unlock(priv);
-		return;
-	}
-	/* If device isn't started, this is all we need to do. */
-	if (!priv->started)
-		goto end;
-	if (priv->rss) {
-		ret = rxq_promiscuous_enable(&priv->rxq_parent);
-		if (ret) {
-			priv_unlock(priv);
-			return;
-		}
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i) {
-		if ((*priv->rxqs)[i] == NULL)
-			continue;
-		ret = rxq_promiscuous_enable((*priv->rxqs)[i]);
-		if (!ret)
-			continue;
-		/* Failure, rollback. */
-		while (i != 0)
-			if ((*priv->rxqs)[--i] != NULL)
-				rxq_promiscuous_disable((*priv->rxqs)[i]);
-		priv_unlock(priv);
-		return;
-	}
-end:
-	priv->promisc = 1;
+	ret = priv_promiscuous_enable(priv);
+	if (ret)
+		ERROR("cannot enable promiscuous mode: %s", strerror(ret));
 	priv_unlock(priv);
 }
 
 /**
- * Disable promiscuous mode in a RX queue.
+ * Disable promiscuous mode in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
+ */
+static void
+hash_rxq_promiscuous_disable(struct hash_rxq *hash_rxq)
+{
+	if (hash_rxq->priv->vf)
+		return;
+	DEBUG("%p: disabling promiscuous mode", (void *)hash_rxq);
+	if (hash_rxq->promisc_flow == NULL)
+		return;
+	claim_zero(ibv_destroy_flow(hash_rxq->promisc_flow));
+	hash_rxq->promisc_flow = NULL;
+	DEBUG("%p: promiscuous mode disabled", (void *)hash_rxq);
+}
+
+/**
+ * Disable promiscuous mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
  */
 void
-rxq_promiscuous_disable(struct rxq *rxq)
+priv_promiscuous_disable(struct priv *priv)
 {
-	if (rxq->priv->vf)
+	unsigned int i;
+
+	if (!priv->promisc)
 		return;
-	DEBUG("%p: disabling promiscuous mode", (void *)rxq);
-	if (rxq->promisc_flow == NULL)
-		return;
-	claim_zero(ibv_destroy_flow(rxq->promisc_flow));
-	rxq->promisc_flow = NULL;
-	DEBUG("%p: promiscuous mode disabled", (void *)rxq);
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_promiscuous_disable(&(*priv->hash_rxqs)[i]);
+	priv->promisc = 0;
 }
 
 /**
@@ -175,61 +206,86 @@ void
 mlx5_promiscuous_disable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 
 	priv_lock(priv);
-	if (!priv->promisc) {
-		priv_unlock(priv);
-		return;
-	}
-	if (priv->rss) {
-		rxq_promiscuous_disable(&priv->rxq_parent);
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i)
-		if ((*priv->rxqs)[i] != NULL)
-			rxq_promiscuous_disable((*priv->rxqs)[i]);
-end:
-	priv->promisc = 0;
+	priv_promiscuous_disable(priv);
 	priv_unlock(priv);
 }
 
 /**
- * Enable allmulti mode in a RX queue.
+ * Enable allmulti mode in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
  */
-int
-rxq_allmulticast_enable(struct rxq *rxq)
+static int
+hash_rxq_allmulticast_enable(struct hash_rxq *hash_rxq)
 {
 	struct ibv_flow *flow;
 	struct ibv_flow_attr attr = {
 		.type = IBV_FLOW_ATTR_MC_DEFAULT,
 		.num_of_specs = 0,
-		.port = rxq->priv->port,
+		.port = hash_rxq->priv->port,
 		.flags = 0
 	};
 
-	DEBUG("%p: enabling allmulticast mode", (void *)rxq);
-	if (rxq->allmulti_flow != NULL)
+	DEBUG("%p: enabling allmulticast mode", (void *)hash_rxq);
+	if (hash_rxq->allmulti_flow != NULL)
 		return EBUSY;
 	errno = 0;
-	flow = ibv_create_flow(rxq->qp, &attr);
+	flow = ibv_create_flow(hash_rxq->qp, &attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
-		      (void *)rxq, errno,
+		      (void *)hash_rxq, errno,
 		      (errno ? strerror(errno) : "Unknown error"));
 		if (errno)
 			return errno;
 		return EINVAL;
 	}
-	rxq->allmulti_flow = flow;
-	DEBUG("%p: allmulticast mode enabled", (void *)rxq);
+	hash_rxq->allmulti_flow = flow;
+	DEBUG("%p: allmulticast mode enabled", (void *)hash_rxq);
+	return 0;
+}
+
+/**
+ * Enable allmulti mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+int
+priv_allmulticast_enable(struct priv *priv)
+{
+	unsigned int i;
+
+	if (priv->allmulti)
+		return 0;
+	/* If device isn't started, this is all we need to do. */
+	if (!priv->started)
+		goto end;
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
+		int ret;
+
+		ret = hash_rxq_allmulticast_enable(hash_rxq);
+		if (!ret)
+			continue;
+		/* Failure, rollback. */
+		while (i != 0) {
+			hash_rxq = &(*priv->hash_rxqs)[--i];
+			hash_rxq_allmulticast_disable(hash_rxq);
+		}
+		return ret;
+	}
+end:
+	priv->allmulti = 1;
 	return 0;
 }
 
@@ -243,58 +299,48 @@ void
 mlx5_allmulticast_enable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 	int ret;
 
 	priv_lock(priv);
-	if (priv->allmulti) {
-		priv_unlock(priv);
-		return;
-	}
-	/* If device isn't started, this is all we need to do. */
-	if (!priv->started)
-		goto end;
-	if (priv->rss) {
-		ret = rxq_allmulticast_enable(&priv->rxq_parent);
-		if (ret) {
-			priv_unlock(priv);
-			return;
-		}
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i) {
-		if ((*priv->rxqs)[i] == NULL)
-			continue;
-		ret = rxq_allmulticast_enable((*priv->rxqs)[i]);
-		if (!ret)
-			continue;
-		/* Failure, rollback. */
-		while (i != 0)
-			if ((*priv->rxqs)[--i] != NULL)
-				rxq_allmulticast_disable((*priv->rxqs)[i]);
-		priv_unlock(priv);
-		return;
-	}
-end:
-	priv->allmulti = 1;
+	ret = priv_allmulticast_enable(priv);
+	if (ret)
+		ERROR("cannot enable allmulticast mode: %s", strerror(ret));
 	priv_unlock(priv);
 }
 
 /**
- * Disable allmulti mode in a RX queue.
+ * Disable allmulti mode in a RX hash queue.
  *
- * @param rxq
- *   Pointer to RX queue structure.
+ * @param hash_rxq
+ *   Pointer to RX hash queue structure.
+ */
+static void
+hash_rxq_allmulticast_disable(struct hash_rxq *hash_rxq)
+{
+	DEBUG("%p: disabling allmulticast mode", (void *)hash_rxq);
+	if (hash_rxq->allmulti_flow == NULL)
+		return;
+	claim_zero(ibv_destroy_flow(hash_rxq->allmulti_flow));
+	hash_rxq->allmulti_flow = NULL;
+	DEBUG("%p: allmulticast mode disabled", (void *)hash_rxq);
+}
+
+/**
+ * Disable allmulti mode in all RX hash queues.
+ *
+ * @param priv
+ *   Private structure.
  */
 void
-rxq_allmulticast_disable(struct rxq *rxq)
+priv_allmulticast_disable(struct priv *priv)
 {
-	DEBUG("%p: disabling allmulticast mode", (void *)rxq);
-	if (rxq->allmulti_flow == NULL)
+	unsigned int i;
+
+	if (!priv->allmulti)
 		return;
-	claim_zero(ibv_destroy_flow(rxq->allmulti_flow));
-	rxq->allmulti_flow = NULL;
-	DEBUG("%p: allmulticast mode disabled", (void *)rxq);
+	for (i = 0; (i != priv->hash_rxqs_n); ++i)
+		hash_rxq_allmulticast_disable(&(*priv->hash_rxqs)[i]);
+	priv->allmulti = 0;
 }
 
 /**
@@ -307,21 +353,8 @@ void
 mlx5_allmulticast_disable(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
-	unsigned int i;
 
 	priv_lock(priv);
-	if (!priv->allmulti) {
-		priv_unlock(priv);
-		return;
-	}
-	if (priv->rss) {
-		rxq_allmulticast_disable(&priv->rxq_parent);
-		goto end;
-	}
-	for (i = 0; (i != priv->rxqs_n); ++i)
-		if ((*priv->rxqs)[i] != NULL)
-			rxq_allmulticast_disable((*priv->rxqs)[i]);
-end:
-	priv->allmulti = 0;
+	priv_allmulticast_disable(priv);
 	priv_unlock(priv);
 }
