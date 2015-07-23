@@ -97,16 +97,10 @@ rxq_alloc_elts_sp(struct rxq *rxq, unsigned int elts_n,
 	for (i = 0; (i != elts_n); ++i) {
 		unsigned int j;
 		struct rxq_elt_sp *elt = &(*elts)[i];
-		struct ibv_recv_wr *wr = &elt->wr;
 		struct ibv_sge (*sges)[(elemof(elt->sges))] = &elt->sges;
 
 		/* These two arrays must have the same size. */
 		assert(elemof(elt->sges) == elemof(elt->bufs));
-		/* Configure WR. */
-		wr->wr_id = i;
-		wr->next = &(*elts)[(i + 1)].wr;
-		wr->sg_list = &(*sges)[0];
-		wr->num_sge = elemof(*sges);
 		/* For each SGE (segment). */
 		for (j = 0; (j != elemof(elt->bufs)); ++j) {
 			struct ibv_sge *sge = &(*sges)[j];
@@ -149,8 +143,6 @@ rxq_alloc_elts_sp(struct rxq *rxq, unsigned int elts_n,
 			assert(sge->length == rte_pktmbuf_tailroom(buf));
 		}
 	}
-	/* The last WR pointer must be NULL. */
-	(*elts)[(i - 1)].wr.next = NULL;
 	DEBUG("%p: allocated and configured %u WRs (%zu segments)",
 	      (void *)rxq, elts_n, (elts_n * elemof((*elts)[0].sges)));
 	rxq->elts_n = elts_n;
@@ -242,7 +234,6 @@ rxq_alloc_elts(struct rxq *rxq, unsigned int elts_n, struct rte_mbuf **pool)
 	/* For each WR (packet). */
 	for (i = 0; (i != elts_n); ++i) {
 		struct rxq_elt *elt = &(*elts)[i];
-		struct ibv_recv_wr *wr = &elt->wr;
 		struct ibv_sge *sge = &(*elts)[i].sge;
 		struct rte_mbuf *buf;
 
@@ -258,16 +249,7 @@ rxq_alloc_elts(struct rxq *rxq, unsigned int elts_n, struct rte_mbuf **pool)
 			ret = ENOMEM;
 			goto error;
 		}
-		/* Configure WR. Work request ID contains its own index in
-		 * the elts array and the offset between SGE buffer header and
-		 * its data. */
-		WR_ID(wr->wr_id).id = i;
-		WR_ID(wr->wr_id).offset =
-			(((uintptr_t)buf->buf_addr + RTE_PKTMBUF_HEADROOM) -
-			 (uintptr_t)buf);
-		wr->next = &(*elts)[(i + 1)].wr;
-		wr->sg_list = sge;
-		wr->num_sge = 1;
+		elt->buf = buf;
 		/* Headroom is reserved by rte_pktmbuf_alloc(). */
 		assert(DATA_OFF(buf) == RTE_PKTMBUF_HEADROOM);
 		/* Buffer is supposed to be empty. */
@@ -282,21 +264,7 @@ rxq_alloc_elts(struct rxq *rxq, unsigned int elts_n, struct rte_mbuf **pool)
 		sge->lkey = rxq->mr->lkey;
 		/* Redundant check for tailroom. */
 		assert(sge->length == rte_pktmbuf_tailroom(buf));
-		/* Make sure elts index and SGE mbuf pointer can be deduced
-		 * from WR ID. */
-		if ((WR_ID(wr->wr_id).id != i) ||
-		    ((void *)((uintptr_t)sge->addr -
-			WR_ID(wr->wr_id).offset) != buf)) {
-			ERROR("%p: cannot store index and offset in WR ID",
-			      (void *)rxq);
-			sge->addr = 0;
-			rte_pktmbuf_free(buf);
-			ret = EOVERFLOW;
-			goto error;
-		}
 	}
-	/* The last WR pointer must be NULL. */
-	(*elts)[(i - 1)].wr.next = NULL;
 	DEBUG("%p: allocated and configured %u single-segment WRs",
 	      (void *)rxq, elts_n);
 	rxq->elts_n = elts_n;
@@ -309,14 +277,10 @@ error:
 		assert(pool == NULL);
 		for (i = 0; (i != elemof(*elts)); ++i) {
 			struct rxq_elt *elt = &(*elts)[i];
-			struct rte_mbuf *buf;
+			struct rte_mbuf *buf = elt->buf;
 
-			if (elt->sge.addr == 0)
-				continue;
-			assert(WR_ID(elt->wr.wr_id).id == i);
-			buf = (void *)((uintptr_t)elt->sge.addr -
-				WR_ID(elt->wr.wr_id).offset);
-			rte_pktmbuf_free_seg(buf);
+			if (buf != NULL)
+				rte_pktmbuf_free_seg(buf);
 		}
 		rte_free(elts);
 	}
@@ -345,14 +309,10 @@ rxq_free_elts(struct rxq *rxq)
 		return;
 	for (i = 0; (i != elemof(*elts)); ++i) {
 		struct rxq_elt *elt = &(*elts)[i];
-		struct rte_mbuf *buf;
+		struct rte_mbuf *buf = elt->buf;
 
-		if (elt->sge.addr == 0)
-			continue;
-		assert(WR_ID(elt->wr.wr_id).id == i);
-		buf = (void *)((uintptr_t)elt->sge.addr -
-			WR_ID(elt->wr.wr_id).offset);
-		rte_pktmbuf_free_seg(buf);
+		if (buf != NULL)
+			rte_pktmbuf_free_seg(buf);
 	}
 	rte_free(elts);
 }
@@ -552,7 +512,6 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	struct rte_mbuf **pool;
 	unsigned int i, k;
 	struct ibv_exp_qp_attr mod;
-	struct ibv_recv_wr *bad_wr;
 	int err;
 	int parent = (rxq == &priv->rxq_parent);
 
@@ -673,11 +632,8 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
 			struct rxq_elt *elt = &(*elts)[i];
-			struct rte_mbuf *buf = (void *)
-				((uintptr_t)elt->sge.addr -
-				 WR_ID(elt->wr.wr_id).offset);
+			struct rte_mbuf *buf = elt->buf;
 
-			assert(WR_ID(elt->wr.wr_id).id == i);
 			pool[k++] = buf;
 		}
 	}
@@ -701,17 +657,36 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	rxq->elts_n = 0;
 	rte_free(rxq->elts.sp);
 	rxq->elts.sp = NULL;
-	/* Post WRs. */
-	err = ibv_post_recv(tmpl.qp,
-			    (tmpl.sp ?
-			     &(*tmpl.elts.sp)[0].wr :
-			     &(*tmpl.elts.no_sp)[0].wr),
-			    &bad_wr);
+	/* Post SGEs. */
+	assert(tmpl.if_qp != NULL);
+	if (tmpl.sp) {
+		struct rxq_elt_sp (*elts)[rxq->elts_n] = tmpl.elts.sp;
+
+		for (i = 0; (i != elemof(*elts)); ++i) {
+			err = tmpl.if_qp->recv_sg_list
+				(tmpl.qp,
+				 (*elts)[i].sges,
+				 elemof((*elts)[i].sges));
+			if (err)
+				break;
+		}
+	} else {
+		struct rxq_elt (*elts)[rxq->elts_n] = tmpl.elts.no_sp;
+
+		for (i = 0; (i != elemof(*elts)); ++i) {
+			err = tmpl.if_qp->recv_burst(
+				tmpl.qp,
+				&(*elts)[i].sge,
+				1);
+			if (err)
+				break;
+		}
+	}
 	if (err) {
-		ERROR("%p: ibv_post_recv() failed for WR %p: %s",
-		      (void *)dev,
-		      (void *)bad_wr,
-		      strerror(err));
+		ERROR("%p: failed to post SGEs with error %d",
+		      (void *)dev, err);
+		/* Set err because it does not contain a valid errno value. */
+		err = EIO;
 		goto skip_rtr;
 	}
 	mod = (struct ibv_exp_qp_attr){
@@ -764,10 +739,10 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		struct ibv_exp_res_domain_init_attr rd;
 	} attr;
 	enum ibv_exp_query_intf_status status;
-	struct ibv_recv_wr *bad_wr;
 	struct rte_mbuf *buf;
 	int ret = 0;
 	int parent = (rxq == &priv->rxq_parent);
+	unsigned int i;
 
 	(void)conf; /* Thresholds configuration (ignored). */
 	/*
@@ -903,28 +878,7 @@ skip_mr:
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	ret = ibv_post_recv(tmpl.qp,
-			    (tmpl.sp ?
-			     &(*tmpl.elts.sp)[0].wr :
-			     &(*tmpl.elts.no_sp)[0].wr),
-			    &bad_wr);
-	if (ret) {
-		ERROR("%p: ibv_post_recv() failed for WR %p: %s",
-		      (void *)dev,
-		      (void *)bad_wr,
-		      strerror(ret));
-		goto error;
-	}
 skip_alloc:
-	mod = (struct ibv_exp_qp_attr){
-		.qp_state = IBV_QPS_RTR
-	};
-	ret = ibv_exp_modify_qp(tmpl.qp, &mod, IBV_EXP_QP_STATE);
-	if (ret) {
-		ERROR("%p: QP state to IBV_QPS_RTR failed: %s",
-		      (void *)dev, strerror(ret));
-		goto error;
-	}
 	/* Save port ID. */
 	tmpl.port_id = dev->data->port_id;
 	DEBUG("%p: RTE port ID: %u", (void *)rxq, tmpl.port_id);
@@ -948,6 +902,46 @@ skip_alloc:
 	if (tmpl.if_qp == NULL) {
 		ERROR("%p: QP interface family query failed with status %d",
 		      (void *)dev, status);
+		goto error;
+	}
+	/* Post SGEs. */
+	if (!parent && tmpl.sp) {
+		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
+
+		for (i = 0; (i != elemof(*elts)); ++i) {
+			ret = tmpl.if_qp->recv_sg_list
+				(tmpl.qp,
+				 (*elts)[i].sges,
+				 elemof((*elts)[i].sges));
+			if (ret)
+				break;
+		}
+	} else if (!parent) {
+		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
+
+		for (i = 0; (i != elemof(*elts)); ++i) {
+			ret = tmpl.if_qp->recv_burst(
+				tmpl.qp,
+				&(*elts)[i].sge,
+				1);
+			if (ret)
+				break;
+		}
+	}
+	if (ret) {
+		ERROR("%p: failed to post SGEs with error %d",
+		      (void *)dev, ret);
+		/* Set ret because it does not contain a valid errno value. */
+		ret = EIO;
+		goto error;
+	}
+	mod = (struct ibv_exp_qp_attr){
+		.qp_state = IBV_QPS_RTR
+	};
+	ret = ibv_exp_modify_qp(tmpl.qp, &mod, IBV_EXP_QP_STATE);
+	if (ret) {
+		ERROR("%p: QP state to IBV_QPS_RTR failed: %s",
+		      (void *)dev, strerror(ret));
 		goto error;
 	}
 	/* Clean up rxq in case we're reinitializing it. */
