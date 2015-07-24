@@ -423,19 +423,6 @@ dev_configure(struct rte_eth_dev *dev)
 	for (i = 0; (i != priv->rxqs_n); ++i)
 		if ((*priv->rxqs)[i] != NULL)
 			return EINVAL;
-	/* Check requested number of RX queues. */
-	if ((rxqs_n > 1) && (!priv->hw_rss)) {
-		ERROR("%p: only a single RX queue can be configured when"
-		      " hardware doesn't support RSS",
-		      (void *)dev);
-		return EINVAL;
-	}
-	/* Fail if hardware doesn't support that many RSS queues. */
-	if (rxqs_n >= priv->max_rss_tbl_sz) {
-		ERROR("%p: only %u RX queues can be configured for RSS",
-		      (void *)dev, priv->max_rss_tbl_sz);
-		return EINVAL;
-	}
 	priv->rxqs_n = rxqs_n;
 	return 0;
 }

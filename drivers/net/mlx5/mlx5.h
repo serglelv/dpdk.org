@@ -103,13 +103,9 @@ struct priv {
 	unsigned int started:1; /* Device started, flows enabled. */
 	unsigned int promisc:1; /* Device in promiscuous mode. */
 	unsigned int allmulti:1; /* Device receives all multicast packets. */
-	unsigned int hw_qpg:1; /* QP groups are supported. */
-	unsigned int hw_tss:1; /* TSS is supported. */
-	unsigned int hw_rss:1; /* RSS is supported. */
 	unsigned int hw_csum:1; /* Checksum offload is supported. */
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int vf:1; /* This is a VF device. */
-	unsigned int max_rss_tbl_sz; /* Maximum number of RSS queues. */
 	/* RX/TX queues. */
 	unsigned int rxqs_n; /* RX queues array size. */
 	unsigned int txqs_n; /* TX queues array size. */
