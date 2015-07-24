@@ -256,13 +256,9 @@ struct priv {
 	unsigned int started:1; /* Device started, flows enabled. */
 	unsigned int promisc:1; /* Device in promiscuous mode. */
 	unsigned int allmulti:1; /* Device receives all multicast packets. */
-	unsigned int hw_qpg:1; /* QP groups are supported. */
-	unsigned int hw_tss:1; /* TSS is supported. */
-	unsigned int hw_rss:1; /* RSS is supported. */
 	unsigned int hw_csum:1; /* Checksum offload is supported. */
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int vf:1; /* This is a VF device. */
-	unsigned int max_rss_tbl_sz; /* Maximum number of RSS queues. */
 	/* RX/TX queues. */
 	unsigned int rxqs_n; /* RX queues array size. */
 	unsigned int txqs_n; /* TX queues array size. */
@@ -893,19 +889,6 @@ dev_configure(struct rte_eth_dev *dev)
 	for (i = 0; (i != priv->rxqs_n); ++i)
 		if ((*priv->rxqs)[i] != NULL)
 			return EINVAL;
-	/* Check requested number of RX queues. */
-	if ((rxqs_n > 1) && (!priv->hw_rss)) {
-		ERROR("%p: only a single RX queue can be configured when"
-		      " hardware doesn't support RSS",
-		      (void *)dev);
-		return EINVAL;
-	}
-	/* Fail if hardware doesn't support that many RSS queues. */
-	if (rxqs_n >= priv->max_rss_tbl_sz) {
-		ERROR("%p: only %u RX queues can be configured for RSS",
-		      (void *)dev, priv->max_rss_tbl_sz);
-		return EINVAL;
-	}
 	priv->rxqs_n = rxqs_n;
 	return 0;
 }
@@ -4783,7 +4766,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 
 #ifdef HAVE_EXP_QUERY_DEVICE
 		exp_device_attr.comp_mask = IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS;
-		exp_device_attr.comp_mask |= IBV_EXP_DEVICE_ATTR_RSS_TBL_SZ;
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
 		DEBUG("using port %u (%08" PRIx32 ")", port, test);
@@ -4833,30 +4815,6 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 			ERROR("ibv_exp_query_device() failed");
 			goto port_error;
 		}
-		if ((exp_device_attr.exp_device_cap_flags &
-		     IBV_EXP_DEVICE_QPG) &&
-		    (exp_device_attr.exp_device_cap_flags &
-		     IBV_EXP_DEVICE_UD_RSS) &&
-		    (exp_device_attr.comp_mask &
-		     IBV_EXP_DEVICE_ATTR_RSS_TBL_SZ) &&
-		    (exp_device_attr.max_rss_tbl_sz > 0)) {
-			priv->hw_qpg = 1;
-			priv->hw_rss = 1;
-			priv->max_rss_tbl_sz = exp_device_attr.max_rss_tbl_sz;
-		} else {
-			priv->hw_qpg = 0;
-			priv->hw_rss = 0;
-			priv->max_rss_tbl_sz = 0;
-		}
-		priv->hw_tss = !!(exp_device_attr.exp_device_cap_flags &
-				  IBV_EXP_DEVICE_UD_TSS);
-		DEBUG("device flags: %s%s%s",
-		      (priv->hw_qpg ? "IBV_DEVICE_QPG " : ""),
-		      (priv->hw_tss ? "IBV_DEVICE_TSS " : ""),
-		      (priv->hw_rss ? "IBV_DEVICE_RSS " : ""));
-		if (priv->hw_rss)
-			DEBUG("maximum RSS indirection table size: %u",
-			      exp_device_attr.max_rss_tbl_sz);
 
 		priv->hw_csum =
 			((exp_device_attr.exp_device_cap_flags &
