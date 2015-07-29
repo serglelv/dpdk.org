@@ -240,6 +240,9 @@ enum hash_rxq_type {
 /* Initialization data for hash RX queue. */
 struct hash_rxq_init {
 	uint64_t hash_fields; /* Fields that participate in the hash. */
+	unsigned int flow_priority; /* Flow priority to use. */
+	struct ibv_flow_spec flow_spec; /* Flow specification template. */
+	const struct hash_rxq_init *underlayer; /* Pointer to underlayer. */
 };
 
 /* Indirection table types. */
@@ -317,19 +320,43 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV4 |
 				IBV_EXP_RX_HASH_SRC_PORT_TCP |
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
+		.flow_priority = 0,
+		.flow_spec.tcp_udp = {
+			.type = IBV_FLOW_SPEC_TCP,
+			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		},
+		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
 	},
 	[HASH_RXQ_UDPv4] = {
 		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV4 |
 				IBV_EXP_RX_HASH_DST_IPV4 |
 				IBV_EXP_RX_HASH_SRC_PORT_UDP |
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
+		.flow_priority = 0,
+		.flow_spec.tcp_udp = {
+			.type = IBV_FLOW_SPEC_UDP,
+			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		},
+		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
 	},
 	[HASH_RXQ_IPv4] = {
 		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV4 |
 				IBV_EXP_RX_HASH_DST_IPV4),
+		.flow_priority = 1,
+		.flow_spec.ipv4 = {
+			.type = IBV_FLOW_SPEC_IPV4,
+			.size = sizeof(hash_rxq_init[0].flow_spec.ipv4),
+		},
+		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
 	},
 	[HASH_RXQ_ETH] = {
 		.hash_fields = 0,
+		.flow_priority = 2,
+		.flow_spec.eth = {
+			.type = IBV_FLOW_SPEC_ETH,
+			.size = sizeof(hash_rxq_init[0].flow_spec.eth),
+		},
+		.underlayer = NULL,
 	},
 };
 
@@ -379,6 +406,21 @@ static uint8_t hash_rxq_default_key[] = {
 	0x06, 0x3c, 0x25, 0xf3,
 	0xfc, 0x1f, 0xdc, 0x2a,
 };
+
+/* Flow structure with Ethernet specification. It is packed to prevent padding
+ * between attr and spec as this layout is expected by libibverbs. */
+struct flow_attr_spec_eth {
+	struct ibv_flow_attr attr;
+	struct ibv_flow_spec_eth spec;
+} __attribute__((packed));
+
+/* Define a struct flow_attr_spec_eth object as an array of at least
+ * "size" bytes. Room after the first index is normally used to store
+ * extra flow specifications. */
+#define FLOW_ATTR_SPEC_ETH(name, size) \
+	struct flow_attr_spec_eth name \
+		[((size) / sizeof(struct flow_attr_spec_eth)) + \
+		 !!((size) % sizeof(struct flow_attr_spec_eth))]
 
 /**
  * Lock private structure to protect it from concurrent access in the
@@ -2308,6 +2350,60 @@ priv_mac_addrs_disable(struct priv *priv)
 }
 
 /**
+ * Populate flow steering rule for a given hash RX queue type using
+ * information from hash_rxq_init[]. Nothing is written to flow_attr when
+ * flow_attr_size is not large enough, but the required size is still returned.
+ *
+ * @param[in] priv
+ *   Pointer to private structure.
+ * @param[out] flow_attr
+ *   Pointer to flow attribute structure to fill. Note that the allocated
+ *   area must be larger and large enough to hold all flow specifications.
+ * @param flow_attr_size
+ *   Entire size of flow_attr and trailing room for flow specifications.
+ * @param type
+ *   Requested Hash RX queue type.
+ *
+ * @return
+ *   Total size of the flow attribute buffer. No errors are defined.
+ */
+static size_t
+priv_populate_flow_attr(const struct priv *priv,
+			struct ibv_flow_attr *flow_attr,
+			size_t flow_attr_size,
+			enum hash_rxq_type type)
+{
+	size_t offset = sizeof(*flow_attr);
+	const struct hash_rxq_init *init = &hash_rxq_init[type];
+
+	assert((size_t)type < elemof(hash_rxq_init));
+	do {
+		offset += init->flow_spec.hdr.size;
+		init = init->underlayer;
+	} while (init != NULL);
+	if (offset > flow_attr_size)
+		return offset;
+	flow_attr_size = offset;
+	init = &hash_rxq_init[type];
+	*flow_attr = (struct ibv_flow_attr){
+		.type = IBV_FLOW_ATTR_NORMAL,
+		.priority = init->flow_priority,
+		.num_of_specs = 0,
+		.port = priv->port,
+		.flags = 0,
+	};
+	do {
+		offset -= init->flow_spec.hdr.size;
+		memcpy((void *)((uintptr_t)flow_attr + offset),
+		       &init->flow_spec,
+		       init->flow_spec.hdr.size);
+		++flow_attr->num_of_specs;
+		init = init->underlayer;
+	} while (init != NULL);
+	return flow_attr_size;
+}
+
+/**
  * Add single flow steering rule.
  *
  * @param hash_rxq
@@ -2329,14 +2425,10 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 			(const uint8_t (*)[ETHER_ADDR_LEN])
 			priv->mac[mac_index].addr_bytes;
-
-	/* Allocate flow specification on the stack. */
-	struct __attribute__((packed)) {
-		struct ibv_flow_attr attr;
-		struct ibv_flow_spec_eth spec;
-	} data;
-	struct ibv_flow_attr *attr = &data.attr;
-	struct ibv_flow_spec_eth *spec = &data.spec;
+	FLOW_ATTR_SPEC_ETH(data, priv_populate_flow_attr(priv, NULL, 0,
+							 hash_rxq->type));
+	struct ibv_flow_attr *attr = &data->attr;
+	struct ibv_flow_spec_eth *spec = &data->spec;
 
 	assert(mac_index < elemof(priv->mac));
 	assert((vlan_index < elemof(priv->vlan_filter)) || (vlan_index == -1u));
@@ -2345,12 +2437,10 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	 * This layout is expected by libibverbs.
 	 */
 	assert(((uint8_t *)attr + sizeof(*attr)) == (uint8_t *)spec);
-	*attr = (struct ibv_flow_attr){
-		.type = IBV_FLOW_ATTR_NORMAL,
-		.num_of_specs = 1,
-		.port = priv->port,
-		.flags = 0
-	};
+	priv_populate_flow_attr(priv, attr, sizeof(data), hash_rxq->type);
+	/* The first specification must be Ethernet. */
+	assert(spec->type == IBV_FLOW_SPEC_ETH);
+	assert(spec->size == sizeof(*spec));
 	*spec = (struct ibv_flow_spec_eth){
 		.type = IBV_FLOW_SPEC_ETH,
 		.size = sizeof(*spec),
