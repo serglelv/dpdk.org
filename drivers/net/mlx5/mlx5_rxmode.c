@@ -74,20 +74,21 @@ static int
 hash_rxq_promiscuous_enable(struct hash_rxq *hash_rxq)
 {
 	struct ibv_flow *flow;
-	struct ibv_flow_attr attr = {
-		.type = IBV_FLOW_ATTR_ALL_DEFAULT,
-		.num_of_specs = 0,
-		.port = hash_rxq->priv->port,
-		.flags = 0
-	};
+	struct priv *priv = hash_rxq->priv;
+	FLOW_ATTR_SPEC_ETH(data, priv_populate_flow_attr(priv, NULL, 0,
+							 hash_rxq->type));
+	struct ibv_flow_attr *attr = &data->attr;
 
 	if (hash_rxq->priv->vf)
 		return 0;
 	DEBUG("%p: enabling promiscuous mode", (void *)hash_rxq);
 	if (hash_rxq->promisc_flow != NULL)
 		return EBUSY;
+	/* Promiscuous flows only differ from normal flows by not filtering
+	 * on specific MAC addresses. */
+	priv_populate_flow_attr(priv, attr, sizeof(data), hash_rxq->type);
 	errno = 0;
-	flow = ibv_create_flow(hash_rxq->qp, &attr);
+	flow = ibv_create_flow(hash_rxq->qp, attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
