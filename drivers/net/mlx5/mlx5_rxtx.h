@@ -118,9 +118,40 @@ struct rxq {
 	struct ibv_exp_res_domain *rd; /* Resource Domain. */
 };
 
+/* Hash RX queue types. */
+enum hash_rxq_type {
+	HASH_RXQ_TCPv4,
+	HASH_RXQ_UDPv4,
+	HASH_RXQ_IPv4,
+	HASH_RXQ_TCPv6,
+	HASH_RXQ_UDPv6,
+	HASH_RXQ_IPv6,
+	HASH_RXQ_ETH,
+};
+
+/* Initialization data for hash RX queue. */
+struct hash_rxq_init {
+	uint64_t hash_fields; /* Fields that participate in the hash. */
+};
+
+/* Indirection table types. */
+enum ind_table_type {
+	IND_TABLE_GENERIC, /* TCP, UDP, IPv4, IPv6. */
+	IND_TABLE_DRAIN, /* Everything else. */
+};
+
+/* Initialization data for indirection table. */
+struct ind_table_init {
+	unsigned int max_size; /* Maximum number of WQs. */
+	/* Hash RX queues using this table. */
+	const enum hash_rxq_type (*hash_types)[];
+	unsigned int hash_types_n;
+};
+
 struct hash_rxq {
 	struct priv *priv; /* Back pointer to private data. */
 	struct ibv_qp *qp; /* Hash RX QP. */
+	enum hash_rxq_type type; /* Hash RX queue type. */
 	/* Each VLAN ID requires a separate flow steering rule. */
 	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
 	struct ibv_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
