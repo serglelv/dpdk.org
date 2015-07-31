@@ -436,7 +436,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		claim_zero(priv_mac_addr_add(priv, 0,
 					     (const uint8_t (*)[ETHER_ADDR_LEN])
 					     mac.addr_bytes));
-		claim_zero(priv_mac_addr_add(priv, 1,
+		claim_zero(priv_mac_addr_add(priv, (RTE_DIM(priv->mac) - 1),
 					     &(const uint8_t [ETHER_ADDR_LEN])
 					     { "\xff\xff\xff\xff\xff\xff" }));
 #ifndef NDEBUG

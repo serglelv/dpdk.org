@@ -483,7 +483,8 @@ mlx5_dev_infos_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *info)
 		max = 65535;
 	info->max_rx_queues = max;
 	info->max_tx_queues = max;
-	info->max_mac_addrs = RTE_DIM(priv->mac);
+	/* Last array entry is reserved for broadcast. */
+	info->max_mac_addrs = (RTE_DIM(priv->mac) - 1);
 	info->rx_offload_capa =
 		(priv->hw_csum ?
 		 (DEV_RX_OFFLOAD_IPV4_CKSUM |
