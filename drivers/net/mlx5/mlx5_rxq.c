@@ -165,7 +165,13 @@ log2above(unsigned int v)
 int
 priv_create_hash_rxqs(struct priv *priv)
 {
-	unsigned int wqs_n = (1 << log2above(priv->rxqs_n));
+	/* If the requested number of WQs is not a power of two, use the
+	 * maximum indirection table size for better balancing.
+	 * The result is always rounded to the next power of two. */
+	unsigned int wqs_n =
+		(1 << log2above((priv->rxqs_n & (priv->rxqs_n - 1)) ?
+				priv->ind_table_max_size :
+				priv->rxqs_n));
 	struct ibv_exp_wq *wqs[wqs_n];
 	/* If only one RX queue is configured, RSS is not needed. */
 	const struct ind_table_init *const *ind_table_init =
@@ -190,16 +196,17 @@ priv_create_hash_rxqs(struct priv *priv)
 	if (priv->rxqs_n == 0)
 		return EINVAL;
 	assert(priv->rxqs != NULL);
-	if (wqs_n < priv->rxqs_n) {
+	if ((wqs_n < priv->rxqs_n) || (wqs_n > priv->ind_table_max_size)) {
 		ERROR("cannot handle this many RX queues (%u)", priv->rxqs_n);
 		err = ERANGE;
 		goto error;
 	}
-	if (wqs_n != priv->rxqs_n)
-		WARN("%u RX queues are configured, consider rounding this"
-		     " number to the next power of two (%u) for optimal"
-		     " performance",
-		     priv->rxqs_n, wqs_n);
+	if (wqs_n != priv->rxqs_n) {
+		INFO("%u RX queues are configured, consider rounding this"
+		     " number to the next power of two for better balancing",
+		     priv->rxqs_n);
+		DEBUG("indirection table extended to assume %u WQs", wqs_n);
+	}
 	/* When the number of RX queues is not a power of two, the remaining
 	 * table entries are padded with reused WQs and hashes are not spread
 	 * uniformly. */
