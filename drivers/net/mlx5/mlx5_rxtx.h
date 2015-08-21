@@ -222,6 +222,9 @@ struct txq {
 
 /* mlx5_rxq.c */
 
+extern uint8_t rss_hash_default_key[];
+extern const size_t rss_hash_default_key_len;
+
 size_t priv_populate_flow_attr(const struct priv *, struct ibv_flow_attr *,
 			       size_t, enum hash_rxq_type);
 int priv_create_hash_rxqs(struct priv *);
