@@ -33,7 +33,6 @@
 
 /*
  * Known limitations:
- * - RSS hash key and options cannot be modified.
  * - Hardware counters aren't implemented.
  */
 
@@ -310,6 +309,7 @@ struct priv {
 	/* Hash RX QPs feeding the indirection table. */
 	struct hash_rxq (*hash_rxqs)[];
 	unsigned int hash_rxqs_n; /* Hash RX QPs array size. */
+	struct rte_eth_rss_conf *rss_conf; /* RSS configuration. */
 	rte_spinlock_t lock; /* Lock for control functions. */
 };
 
@@ -439,7 +439,7 @@ static const struct ind_table_init *const ind_table_init_no_rss[] = {
 };
 
 /* Default RSS hash key also used for ConnectX-3. */
-static uint8_t hash_rxq_default_key[] = {
+static uint8_t rss_hash_default_key[] = {
 	0x2c, 0xc6, 0x81, 0xd1,
 	0x5b, 0xdb, 0xf4, 0xf7,
 	0xfc, 0xa2, 0x83, 0x19,
@@ -884,6 +884,7 @@ priv_create_hash_rxqs(struct priv *priv)
 	assert(priv->hash_rxqs_n == 0);
 	assert(priv->pd != NULL);
 	assert(priv->ctx != NULL);
+	assert(priv->rss_conf != NULL);
 	if (priv->rxqs_n == 0)
 		return EINVAL;
 	assert(priv->rxqs != NULL);
@@ -964,8 +965,8 @@ priv_create_hash_rxqs(struct priv *priv)
 		enum hash_rxq_type type = (*ind_table_init[j]->hash_types)[k];
 		struct ibv_exp_rx_hash_conf hash_conf = {
 			.rx_hash_function = IBV_EXP_RX_HASH_FUNC_TOEPLITZ,
-			.rx_hash_key_len = sizeof(hash_rxq_default_key),
-			.rx_hash_key = hash_rxq_default_key,
+			.rx_hash_key_len = priv->rss_conf->rss_key_len,
+			.rx_hash_key = priv->rss_conf->rss_key,
 			.rx_hash_fields_mask = hash_rxq_init[type].hash_fields,
 			.rwq_ind_tbl = (*ind_tables)[j],
 		};
@@ -4144,6 +4145,7 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 		claim_zero(ibv_close_device(priv->ctx));
 	} else
 		assert(priv->ctx == NULL);
+	rte_free(priv->rss_conf);
 	priv_unlock(priv);
 	memset(priv, 0, sizeof(*priv));
 }
@@ -4769,6 +4771,109 @@ mlx5_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 	return -ret;
 }
 
+/**
+ * Register a RSS key.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ * @param key
+ *   Hash key to register.
+ * @param key_len
+ *   Hash key length in bytes.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+rss_hash_rss_conf_new_key(struct priv *priv, const uint8_t *key,
+			  unsigned int key_len)
+{
+	struct rte_eth_rss_conf *rss_conf;
+
+	rss_conf = rte_realloc(priv->rss_conf,
+			       (sizeof(*rss_conf) + key_len),
+			       0);
+	if (!rss_conf)
+		return ENOMEM;
+	rss_conf->rss_key = (void *)(rss_conf + 1);
+	rss_conf->rss_key_len = key_len;
+	memcpy(rss_conf->rss_key, key, key_len);
+	priv->rss_conf = rss_conf;
+	return 0;
+}
+
+/**
+ * DPDK callback to update the RSS hash configuration.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param[in] rss_conf
+ *   RSS configuration data.
+ *
+ * @return
+ *   0 on success, negative errno value on failure.
+ */
+static int
+mlx5_rss_hash_update(struct rte_eth_dev *dev,
+		     struct rte_eth_rss_conf *rss_conf)
+{
+	struct priv *priv = dev->data->dev_private;
+	int err = 0;
+
+	priv_lock(priv);
+
+	assert(priv->rss_conf != NULL);
+
+	/* Apply configuration. */
+	if (rss_conf->rss_key)
+		err = rss_hash_rss_conf_new_key(priv,
+						rss_conf->rss_key,
+						rss_conf->rss_key_len);
+	else
+		err = rss_hash_rss_conf_new_key(priv,
+						rss_hash_default_key,
+						sizeof(rss_hash_default_key));
+
+	/* FIXME: rss_hf is ignored. */
+	priv_unlock(priv);
+	assert(err >= 0);
+	return -err;
+}
+
+/**
+ * DPDK callback to get the RSS hash configuration.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param[in, out] rss_conf
+ *   RSS configuration data.
+ *
+ * @return
+ *   0 on success, negative errno value on failure.
+ */
+static int
+mlx5_rss_hash_conf_get(struct rte_eth_dev *dev,
+		       struct rte_eth_rss_conf *rss_conf)
+{
+	struct priv *priv = dev->data->dev_private;
+
+	priv_lock(priv);
+
+	assert(priv->rss_conf != NULL);
+
+	if (rss_conf->rss_key &&
+	    rss_conf->rss_key_len >= priv->rss_conf->rss_key_len)
+		memcpy(rss_conf->rss_key,
+		       priv->rss_conf->rss_key,
+		       priv->rss_conf->rss_key_len);
+	rss_conf->rss_key_len = priv->rss_conf->rss_key_len;
+	/* FIXME: rss_hf should be more specific. */
+	rss_conf->rss_hf = ETH_RSS_PROTO_MASK;
+
+	priv_unlock(priv);
+	return 0;
+}
+
 static const struct eth_dev_ops mlx5_dev_ops = {
 	.dev_configure = mlx5_dev_configure,
 	.dev_start = mlx5_dev_start,
@@ -4807,7 +4912,9 @@ static const struct eth_dev_ops mlx5_dev_ops = {
 	.fdir_add_perfect_filter = NULL,
 	.fdir_update_perfect_filter = NULL,
 	.fdir_remove_perfect_filter = NULL,
-	.fdir_set_masks = NULL
+	.fdir_set_masks = NULL,
+	.rss_hash_update = mlx5_rss_hash_update,
+	.rss_hash_conf_get = mlx5_rss_hash_conf_get,
 };
 
 /**
@@ -5121,6 +5228,12 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 
 		(void)mlx5_getenv_int;
 		priv->vf = vf;
+		/* Register default RSS hash key. */
+		err = rss_hash_rss_conf_new_key(priv,
+						rss_hash_default_key,
+						sizeof(rss_hash_default_key));
+		if (err)
+			goto port_error;
 		/* Configure the first MAC address by default. */
 		if (priv_get_mac(priv, &mac.addr_bytes)) {
 			ERROR("cannot get MAC address, is mlx5_en loaded?"
@@ -5184,6 +5297,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		continue;
 
 port_error:
+		rte_free(priv->rss_conf);
 		rte_free(priv);
 		if (pd)
 			claim_zero(ibv_dealloc_pd(pd));
