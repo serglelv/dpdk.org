@@ -119,6 +119,9 @@
 #define NB_SEGS(m) ((m)->nb_segs)
 #define PORT(m) ((m)->port)
 
+/* RSS Indirection table size. */
+#define RSS_INDIRECTION_TABLE_SIZE 128
+
 /* Transpose flags. Useful to convert IBV to DPDK flags. */
 #define TRANSPOSE(val, from, to) \
 	(((from) >= (to)) ? \
@@ -300,6 +303,7 @@ struct priv {
 	/* Indirection tables referencing all RX WQs. */
 	struct ibv_exp_rwq_ind_table *(*ind_tables)[];
 	unsigned int ind_tables_n; /* Number of indirection tables. */
+	unsigned int ind_table_max_size; /* Maximum indirection table size. */
 	/* Hash RX QPs feeding the indirection table. */
 	struct hash_rxq (*hash_rxqs)[];
 	unsigned int hash_rxqs_n; /* Hash RX QPs array size. */
@@ -765,7 +769,13 @@ log2above(unsigned int v)
 static int
 priv_create_hash_rxqs(struct priv *priv)
 {
-	unsigned int wqs_n = (1 << log2above(priv->rxqs_n));
+	/* If the requested number of WQs is not a power of two, use the
+	 * maximum indirection table size for better balancing.
+	 * The result is always rounded to the next power of two. */
+	unsigned int wqs_n =
+		(1 << log2above((priv->rxqs_n & (priv->rxqs_n - 1)) ?
+				priv->ind_table_max_size :
+				priv->rxqs_n));
 	struct ibv_exp_wq *wqs[wqs_n];
 	/* If only one RX queue is configured, RSS is not needed. */
 	const struct ind_table_init *const *ind_table_init =
@@ -790,16 +800,17 @@ priv_create_hash_rxqs(struct priv *priv)
 	if (priv->rxqs_n == 0)
 		return EINVAL;
 	assert(priv->rxqs != NULL);
-	if (wqs_n < priv->rxqs_n) {
+	if ((wqs_n < priv->rxqs_n) || (wqs_n > priv->ind_table_max_size)) {
 		ERROR("cannot handle this many RX queues (%u)", priv->rxqs_n);
 		err = ERANGE;
 		goto error;
 	}
-	if (wqs_n != priv->rxqs_n)
-		WARN("%u RX queues are configured, consider rounding this"
-		     " number to the next power of two (%u) for optimal"
-		     " performance",
-		     priv->rxqs_n, wqs_n);
+	if (wqs_n != priv->rxqs_n) {
+		INFO("%u RX queues are configured, consider rounding this"
+		     " number to the next power of two for better balancing",
+		     priv->rxqs_n);
+		DEBUG("indirection table extended to assume %u WQs", wqs_n);
+	}
 	/* When the number of RX queues is not a power of two, the remaining
 	 * table entries are padded with reused WQs and hashes are not spread
 	 * uniformly. */
@@ -4898,7 +4909,9 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		struct ether_addr mac;
 
 #ifdef HAVE_EXP_QUERY_DEVICE
-		exp_device_attr.comp_mask = IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS;
+		exp_device_attr.comp_mask =
+			IBV_EXP_DEVICE_ATTR_EXP_CAP_FLAGS |
+			IBV_EXP_DEVICE_ATTR_RX_HASH;
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
 		DEBUG("using port %u (%08" PRIx32 ")", port, test);
@@ -4962,6 +4975,12 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		DEBUG("L2 tunnel checksum offloads are %ssupported",
 		      (priv->hw_csum_l2tun ? "" : "not "));
 
+		priv->ind_table_max_size = exp_device_attr.rx_hash_caps.max_rwq_indirection_table_size;
+		DEBUG("maximum RX indirection table size is %u",
+		      priv->ind_table_max_size);
+
+#else /* HAVE_EXP_QUERY_DEVICE */
+		priv->ind_table_max_size = RSS_INDIRECTION_TABLE_SIZE;
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
 		(void)mlx5_getenv_int;
