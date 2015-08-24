@@ -239,6 +239,7 @@ enum hash_rxq_type {
 /* Initialization data for hash RX queue. */
 struct hash_rxq_init {
 	uint64_t hash_fields; /* Fields that participate in the hash. */
+	uint64_t dpdk_rss_hf; /* Matching DPDK RSS hash fields. */
 	unsigned int flow_priority; /* Flow priority to use. */
 	struct ibv_flow_spec flow_spec; /* Flow specification template. */
 	const struct hash_rxq_init *underlayer; /* Pointer to underlayer. */
@@ -309,7 +310,8 @@ struct priv {
 	/* Hash RX QPs feeding the indirection table. */
 	struct hash_rxq (*hash_rxqs)[];
 	unsigned int hash_rxqs_n; /* Hash RX QPs array size. */
-	struct rte_eth_rss_conf *rss_conf; /* RSS configuration. */
+	/* RSS configuration array indexed by hash RX queue type. */
+	struct rte_eth_rss_conf *(*rss_conf)[];
 	rte_spinlock_t lock; /* Lock for control functions. */
 };
 
@@ -320,6 +322,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV4 |
 				IBV_EXP_RX_HASH_SRC_PORT_TCP |
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
+		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_TCP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_FLOW_SPEC_TCP,
@@ -332,6 +335,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV4 |
 				IBV_EXP_RX_HASH_SRC_PORT_UDP |
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
+		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_UDP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_FLOW_SPEC_UDP,
@@ -342,6 +346,8 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 	[HASH_RXQ_IPv4] = {
 		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV4 |
 				IBV_EXP_RX_HASH_DST_IPV4),
+		.dpdk_rss_hf = (ETH_RSS_IPV4 |
+				ETH_RSS_FRAG_IPV4),
 		.flow_priority = 1,
 		.flow_spec.ipv4 = {
 			.type = IBV_FLOW_SPEC_IPV4,
@@ -355,6 +361,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV6 |
 				IBV_EXP_RX_HASH_SRC_PORT_TCP |
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
+		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_TCP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_FLOW_SPEC_TCP,
@@ -367,6 +374,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV6 |
 				IBV_EXP_RX_HASH_SRC_PORT_UDP |
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
+		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_UDP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_FLOW_SPEC_UDP,
@@ -377,6 +385,8 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 	[HASH_RXQ_IPv6] = {
 		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV6 |
 				IBV_EXP_RX_HASH_DST_IPV6),
+		.dpdk_rss_hf = (ETH_RSS_IPV6 |
+				ETH_RSS_FRAG_IPV6),
 		.flow_priority = 1,
 		.flow_spec.ipv6 = {
 			.type = IBV_FLOW_SPEC_IPV6,
@@ -387,6 +397,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 #endif /* HASH_RXQ_IPV6 */
 	[HASH_RXQ_ETH] = {
 		.hash_fields = 0,
+		.dpdk_rss_hf = 0,
 		.flow_priority = 2,
 		.flow_spec.eth = {
 			.type = IBV_FLOW_SPEC_ETH,
@@ -884,7 +895,6 @@ priv_create_hash_rxqs(struct priv *priv)
 	assert(priv->hash_rxqs_n == 0);
 	assert(priv->pd != NULL);
 	assert(priv->ctx != NULL);
-	assert(priv->rss_conf != NULL);
 	if (priv->rxqs_n == 0)
 		return EINVAL;
 	assert(priv->rxqs != NULL);
@@ -963,10 +973,16 @@ priv_create_hash_rxqs(struct priv *priv)
 	     ++i) {
 		struct hash_rxq *hash_rxq = &(*hash_rxqs)[i];
 		enum hash_rxq_type type = (*ind_table_init[j]->hash_types)[k];
+		struct rte_eth_rss_conf *priv_rss_conf =
+			(*priv->rss_conf)[type];
 		struct ibv_exp_rx_hash_conf hash_conf = {
 			.rx_hash_function = IBV_EXP_RX_HASH_FUNC_TOEPLITZ,
-			.rx_hash_key_len = priv->rss_conf->rss_key_len,
-			.rx_hash_key = priv->rss_conf->rss_key,
+			.rx_hash_key_len = (priv_rss_conf ?
+					    priv_rss_conf->rss_key_len :
+					    sizeof(rss_hash_default_key)),
+			.rx_hash_key = (priv_rss_conf ?
+					priv_rss_conf->rss_key :
+					rss_hash_default_key),
 			.rx_hash_fields_mask = hash_rxq_init[type].hash_fields,
 			.rwq_ind_tbl = (*ind_tables)[j],
 		};
@@ -4145,7 +4161,11 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 		claim_zero(ibv_close_device(priv->ctx));
 	} else
 		assert(priv->ctx == NULL);
-	rte_free(priv->rss_conf);
+	if (priv->rss_conf != NULL) {
+		for (i = 0; (i != elemof(hash_rxq_init)); ++i)
+			rte_free((*priv->rss_conf)[i]);
+		rte_free(priv->rss_conf);
+	}
 	priv_unlock(priv);
 	memset(priv, 0, sizeof(*priv));
 }
@@ -4772,6 +4792,33 @@ mlx5_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 }
 
 /**
+ * Get a RSS configuration hash key.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ * @param rss_hf
+ *   RSS hash functions configuration must be retrieved for.
+ *
+ * @return
+ *   Pointer to a RSS configuration structure or NULL if rss_hf cannot
+ *   be matched.
+ */
+static struct rte_eth_rss_conf *
+rss_hash_get(struct priv *priv, uint64_t rss_hf)
+{
+	unsigned int i;
+
+	for (i = 0; (i != elemof(hash_rxq_init)); ++i) {
+		uint64_t dpdk_rss_hf = hash_rxq_init[i].dpdk_rss_hf;
+
+		if (!(dpdk_rss_hf & rss_hf))
+			continue;
+		return (*priv->rss_conf)[i];
+	}
+	return NULL;
+}
+
+/**
  * Register a RSS key.
  *
  * @param priv
@@ -4780,25 +4827,35 @@ mlx5_vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
  *   Hash key to register.
  * @param key_len
  *   Hash key length in bytes.
+ * @param rss_hf
+ *   RSS hash functions the provided key applies to.
  *
  * @return
  *   0 on success, errno value on failure.
  */
 static int
 rss_hash_rss_conf_new_key(struct priv *priv, const uint8_t *key,
-			  unsigned int key_len)
+			  unsigned int key_len, uint64_t rss_hf)
 {
-	struct rte_eth_rss_conf *rss_conf;
+	unsigned int i;
 
-	rss_conf = rte_realloc(priv->rss_conf,
-			       (sizeof(*rss_conf) + key_len),
-			       0);
-	if (!rss_conf)
-		return ENOMEM;
-	rss_conf->rss_key = (void *)(rss_conf + 1);
-	rss_conf->rss_key_len = key_len;
-	memcpy(rss_conf->rss_key, key, key_len);
-	priv->rss_conf = rss_conf;
+	for (i = 0; (i != elemof(hash_rxq_init)); ++i) {
+		struct rte_eth_rss_conf *rss_conf;
+		uint64_t dpdk_rss_hf = hash_rxq_init[i].dpdk_rss_hf;
+
+		if (!(dpdk_rss_hf & rss_hf))
+			continue;
+		rss_conf = rte_realloc((*priv->rss_conf)[i],
+				       (sizeof(*rss_conf) + key_len),
+				       0);
+		if (!rss_conf)
+			return ENOMEM;
+		rss_conf->rss_key = (void *)(rss_conf + 1);
+		rss_conf->rss_key_len = key_len;
+		rss_conf->rss_hf = dpdk_rss_hf;
+		memcpy(rss_conf->rss_key, key, key_len);
+		(*priv->rss_conf)[i] = rss_conf;
+	}
 	return 0;
 }
 
@@ -4828,13 +4885,14 @@ mlx5_rss_hash_update(struct rte_eth_dev *dev,
 	if (rss_conf->rss_key)
 		err = rss_hash_rss_conf_new_key(priv,
 						rss_conf->rss_key,
-						rss_conf->rss_key_len);
+						rss_conf->rss_key_len,
+						rss_conf->rss_hf);
 	else
 		err = rss_hash_rss_conf_new_key(priv,
 						rss_hash_default_key,
-						sizeof(rss_hash_default_key));
+						sizeof(rss_hash_default_key),
+						ETH_RSS_PROTO_MASK);
 
-	/* FIXME: rss_hf is ignored. */
 	priv_unlock(priv);
 	assert(err >= 0);
 	return -err;
@@ -4856,19 +4914,25 @@ mlx5_rss_hash_conf_get(struct rte_eth_dev *dev,
 		       struct rte_eth_rss_conf *rss_conf)
 {
 	struct priv *priv = dev->data->dev_private;
+	struct rte_eth_rss_conf *priv_rss_conf;
 
 	priv_lock(priv);
 
 	assert(priv->rss_conf != NULL);
 
+	priv_rss_conf = rss_hash_get(priv, rss_conf->rss_hf);
+	if (!priv_rss_conf) {
+		rss_conf->rss_hf = 0;
+		priv_unlock(priv);
+		return -EINVAL;
+	}
 	if (rss_conf->rss_key &&
-	    rss_conf->rss_key_len >= priv->rss_conf->rss_key_len)
+	    rss_conf->rss_key_len >= priv_rss_conf->rss_key_len)
 		memcpy(rss_conf->rss_key,
-		       priv->rss_conf->rss_key,
-		       priv->rss_conf->rss_key_len);
-	rss_conf->rss_key_len = priv->rss_conf->rss_key_len;
-	/* FIXME: rss_hf should be more specific. */
-	rss_conf->rss_hf = ETH_RSS_PROTO_MASK;
+		       priv_rss_conf->rss_key,
+		       priv_rss_conf->rss_key_len);
+	rss_conf->rss_key_len = priv_rss_conf->rss_key_len;
+	rss_conf->rss_hf = priv_rss_conf->rss_hf;
 
 	priv_unlock(priv);
 	return 0;
@@ -5228,10 +5292,17 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 
 		(void)mlx5_getenv_int;
 		priv->vf = vf;
-		/* Register default RSS hash key. */
+		/* Allocate and register default RSS hash keys. */
+		priv->rss_conf = rte_calloc(__func__, elemof(hash_rxq_init),
+					    sizeof((*priv->rss_conf)[0]), 0);
+		if (priv->rss_conf == NULL) {
+			err = ENOMEM;
+			goto port_error;
+		}
 		err = rss_hash_rss_conf_new_key(priv,
 						rss_hash_default_key,
-						sizeof(rss_hash_default_key));
+						sizeof(rss_hash_default_key),
+						ETH_RSS_PROTO_MASK);
 		if (err)
 			goto port_error;
 		/* Configure the first MAC address by default. */
