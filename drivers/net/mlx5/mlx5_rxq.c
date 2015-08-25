@@ -1141,7 +1141,8 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 				 MLX5_PMD_SGE_WR_N),
 		.pd = priv->pd,
 		.cq = tmpl.cq,
-		.comp_mask = 0,
+		.comp_mask = IBV_EXP_CREATE_WQ_RES_DOMAIN,
+		.res_domain = tmpl.rd,
 	};
 	tmpl.wq = ibv_exp_create_wq(priv->ctx, &attr.wq);
 	if (tmpl.wq == NULL) {
