@@ -71,9 +71,9 @@ mlx5_dev_start(struct rte_eth_dev *dev)
 	err = priv_create_hash_rxqs(priv);
 	if (!err)
 		err = priv_mac_addrs_enable(priv);
-	if (!err && priv->promisc)
+	if (!err && priv->promisc_req)
 		err = priv_promiscuous_enable(priv);
-	if (!err && priv->allmulti)
+	if (!err && priv->allmulti_req)
 		err = priv_allmulticast_enable(priv);
 	if (!err)
 		priv->started = 1;
