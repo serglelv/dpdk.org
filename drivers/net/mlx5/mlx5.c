@@ -254,7 +254,9 @@ struct priv {
 	uint16_t mtu; /* Configured MTU. */
 	uint8_t port; /* Physical port number. */
 	unsigned int started:1; /* Device started, flows enabled. */
+	unsigned int promisc_req:1; /* Promiscuous mode requested. */
 	unsigned int promisc:1; /* Device in promiscuous mode. */
+	unsigned int allmulti_req:1; /* All multicast mode requested. */
 	unsigned int allmulti:1; /* Device receives all multicast packets. */
 	unsigned int hw_csum:1; /* Checksum offload is supported. */
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
@@ -2508,9 +2510,6 @@ priv_allmulticast_enable(struct priv *priv)
 
 	if (priv->allmulti)
 		return 0;
-	/* If device isn't started, this is all we need to do. */
-	if (!priv->started)
-		goto end;
 	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
 		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
 		int ret;
@@ -2525,7 +2524,6 @@ priv_allmulticast_enable(struct priv *priv)
 		}
 		return ret;
 	}
-end:
 	priv->allmulti = 1;
 	return 0;
 }
@@ -2624,9 +2622,6 @@ priv_promiscuous_enable(struct priv *priv)
 
 	if (priv->promisc)
 		return 0;
-	/* If device isn't started, this is all we need to do. */
-	if (!priv->started)
-		goto end;
 	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
 		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
 		int ret;
@@ -2641,7 +2636,6 @@ priv_promiscuous_enable(struct priv *priv)
 		}
 		return ret;
 	}
-end:
 	priv->promisc = 1;
 	return 0;
 }
@@ -3710,9 +3704,9 @@ mlx5_dev_start(struct rte_eth_dev *dev)
 	err = priv_create_hash_rxqs(priv);
 	if (!err)
 		err = priv_mac_addrs_enable(priv);
-	if (!err && priv->promisc)
+	if (!err && priv->promisc_req)
 		err = priv_promiscuous_enable(priv);
-	if (!err && priv->allmulti)
+	if (!err && priv->allmulti_req)
 		err = priv_allmulticast_enable(priv);
 	if (!err)
 		priv->started = 1;
@@ -4095,6 +4089,7 @@ mlx5_promiscuous_enable(struct rte_eth_dev *dev)
 	int ret;
 
 	priv_lock(priv);
+	priv->promisc_req = 1;
 	ret = priv_promiscuous_enable(priv);
 	if (ret)
 		ERROR("cannot enable promiscuous mode: %s", strerror(ret));
@@ -4113,6 +4108,7 @@ mlx5_promiscuous_disable(struct rte_eth_dev *dev)
 	struct priv *priv = dev->data->dev_private;
 
 	priv_lock(priv);
+	priv->promisc_req = 0;
 	priv_promiscuous_disable(priv);
 	priv_unlock(priv);
 }
@@ -4130,6 +4126,7 @@ mlx5_allmulticast_enable(struct rte_eth_dev *dev)
 	int ret;
 
 	priv_lock(priv);
+	priv->allmulti_req = 1;
 	ret = priv_allmulticast_enable(priv);
 	if (ret)
 		ERROR("cannot enable allmulticast mode: %s", strerror(ret));
@@ -4148,6 +4145,7 @@ mlx5_allmulticast_disable(struct rte_eth_dev *dev)
 	struct priv *priv = dev->data->dev_private;
 
 	priv_lock(priv);
+	priv->allmulti_req = 0;
 	priv_allmulticast_disable(priv);
 	priv_unlock(priv);
 }
