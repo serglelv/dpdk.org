@@ -349,6 +349,42 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
 	},
+#ifdef HASH_RXQ_IPV6
+	[HASH_RXQ_TCPv6] = {
+		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV6 |
+				IBV_EXP_RX_HASH_DST_IPV6 |
+				IBV_EXP_RX_HASH_SRC_PORT_TCP |
+				IBV_EXP_RX_HASH_DST_PORT_TCP),
+		.flow_priority = 0,
+		.flow_spec.tcp_udp = {
+			.type = IBV_FLOW_SPEC_TCP,
+			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		},
+		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
+	},
+	[HASH_RXQ_UDPv6] = {
+		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV6 |
+				IBV_EXP_RX_HASH_DST_IPV6 |
+				IBV_EXP_RX_HASH_SRC_PORT_UDP |
+				IBV_EXP_RX_HASH_DST_PORT_UDP),
+		.flow_priority = 0,
+		.flow_spec.tcp_udp = {
+			.type = IBV_FLOW_SPEC_UDP,
+			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		},
+		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
+	},
+	[HASH_RXQ_IPv6] = {
+		.hash_fields = (IBV_EXP_RX_HASH_SRC_IPV6 |
+				IBV_EXP_RX_HASH_DST_IPV6),
+		.flow_priority = 1,
+		.flow_spec.ipv6 = {
+			.type = IBV_FLOW_SPEC_IPV6,
+			.size = sizeof(hash_rxq_init[0].flow_spec.ipv6),
+		},
+		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
+	},
+#endif /* HASH_RXQ_IPV6 */
 	[HASH_RXQ_ETH] = {
 		.hash_fields = 0,
 		.flow_priority = 2,
@@ -368,8 +404,17 @@ static const struct ind_table_init ind_table_init[] = {
 			HASH_RXQ_TCPv4,
 			HASH_RXQ_UDPv4,
 			HASH_RXQ_IPv4,
+#ifdef HASH_RXQ_IPV6
+			HASH_RXQ_TCPv6,
+			HASH_RXQ_UDPv6,
+			HASH_RXQ_IPv6,
+#endif /* HASH_RXQ_IPV6 */
 		},
+#ifdef HASH_RXQ_IPV6
+		.hash_types_n = 6,
+#else /* HASH_RXQ_IPV6 */
 		.hash_types_n = 3,
+#endif
 	},
 	[IND_TABLE_DRAIN] = {
 		.max_size = 1,
