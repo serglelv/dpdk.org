@@ -225,7 +225,7 @@ struct txq {
 
 struct hash_rxq {
 	struct priv *priv; /* Back pointer to private data. */
-	struct ibv_qp *qp; /* RX hash QP. */
+	struct ibv_qp *qp; /* Hash RX QP. */
 	/* Each VLAN ID requires a separate flow steering rule. */
 	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
 	struct ibv_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
@@ -268,9 +268,9 @@ struct priv {
 	struct txq *(*txqs)[]; /* TX queues. */
 	/* Indirection table referencing all RX WQs. */
 	struct ibv_exp_rwq_ind_table *ind_table;
-	/* RX hash QPs that feed the indirection table. */
+	/* Hash RX QPs feeding the indirection table. */
 	struct hash_rxq (*hash_rxqs)[];
-	unsigned int hash_rxqs_n; /* RX hash QPs array size. */
+	unsigned int hash_rxqs_n; /* Hash RX QPs array size. */
 	rte_spinlock_t lock; /* Lock for control functions. */
 };
 
@@ -640,7 +640,8 @@ priv_set_flags(struct priv *priv, unsigned int keep, unsigned int flags)
  * @return
  *   Nearest power of two above input value.
  */
-static unsigned int log2above(unsigned int v)
+static unsigned int
+log2above(unsigned int v)
 {
 	unsigned int l;
 	unsigned int r;
