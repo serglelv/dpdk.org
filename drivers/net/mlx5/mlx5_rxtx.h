@@ -120,7 +120,7 @@ struct rxq {
 
 struct hash_rxq {
 	struct priv *priv; /* Back pointer to private data. */
-	struct ibv_qp *qp; /* RX hash QP. */
+	struct ibv_qp *qp; /* Hash RX QP. */
 	/* Each VLAN ID requires a separate flow steering rule. */
 	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
 	struct ibv_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];

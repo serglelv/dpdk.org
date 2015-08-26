@@ -72,7 +72,8 @@
  * @return
  *   Nearest power of two above input value.
  */
-static unsigned int log2above(unsigned int v)
+static unsigned int
+log2above(unsigned int v)
 {
 	unsigned int l;
 	unsigned int r;
