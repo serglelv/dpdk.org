@@ -2921,6 +2921,8 @@ priv_promiscuous_enable(struct priv *priv)
 		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
 		int ret;
 
+		/* Remove normal MAC flows first. */
+		hash_rxq_mac_addrs_del(hash_rxq);
 		ret = hash_rxq_promiscuous_enable(hash_rxq);
 		if (!ret)
 			continue;
@@ -2928,6 +2930,9 @@ priv_promiscuous_enable(struct priv *priv)
 		while (i != 0) {
 			hash_rxq = &(*priv->hash_rxqs)[--i];
 			hash_rxq_promiscuous_disable(hash_rxq);
+			/* Restore MAC flows. */
+			if (priv->started)
+				hash_rxq_mac_addrs_add(hash_rxq);
 		}
 		return ret;
 	}
@@ -2967,8 +2972,14 @@ priv_promiscuous_disable(struct priv *priv)
 
 	if (!priv->promisc)
 		return;
-	for (i = 0; (i != priv->hash_rxqs_n); ++i)
-		hash_rxq_promiscuous_disable(&(*priv->hash_rxqs)[i]);
+	for (i = 0; (i != priv->hash_rxqs_n); ++i) {
+		struct hash_rxq *hash_rxq = &(*priv->hash_rxqs)[i];
+
+		hash_rxq_promiscuous_disable(hash_rxq);
+		/* Restore MAC flows. */
+		if (priv->started)
+			hash_rxq_mac_addrs_add(hash_rxq);
+	}
 	priv->promisc = 0;
 }
 
