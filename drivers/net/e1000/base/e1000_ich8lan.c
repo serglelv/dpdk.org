@@ -104,7 +104,7 @@ STATIC s32  e1000_setup_link_ich8lan(struct e1000_hw *hw);
 STATIC s32  e1000_setup_copper_link_ich8lan(struct e1000_hw *hw);
 STATIC s32  e1000_setup_copper_link_pch_lpt(struct e1000_hw *hw);
 STATIC s32  e1000_get_link_up_info_ich8lan(struct e1000_hw *hw,
-					   u16 *speed, u16 *duplex);
+					   u32 *speed, u16 *duplex);
 STATIC s32  e1000_cleanup_led_ich8lan(struct e1000_hw *hw);
 STATIC s32  e1000_led_on_ich8lan(struct e1000_hw *hw);
 STATIC s32  e1000_led_off_ich8lan(struct e1000_hw *hw);
@@ -4561,7 +4561,7 @@ STATIC s32 e1000_setup_copper_link_pch_lpt(struct e1000_hw *hw)
  *  information and then calls the Kumeran lock loss workaround for links at
  *  gigabit speeds.
  **/
-STATIC s32 e1000_get_link_up_info_ich8lan(struct e1000_hw *hw, u16 *speed,
+STATIC s32 e1000_get_link_up_info_ich8lan(struct e1000_hw *hw, u32 *speed,
 					  u16 *duplex)
 {
 	s32 ret_val;

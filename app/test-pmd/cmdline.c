@@ -905,7 +905,7 @@ cmd_config_speed_all_parsed(void *parsed_result,
 			__attribute__((unused)) void *data)
 {
 	struct cmd_config_speed_all *res = parsed_result;
-	uint16_t link_speed = ETH_LINK_SPEED_AUTONEG;
+	uint32_t link_speed = ETH_LINK_SPEED_AUTONEG;
 	uint16_t link_duplex = 0;
 	portid_t pid;
 
@@ -924,6 +924,8 @@ cmd_config_speed_all_parsed(void *parsed_result,
 		link_speed = ETH_LINK_SPEED_10G;
 	else if (!strcmp(res->value1, "40000"))
 		link_speed = ETH_LINK_SPEED_40G;
+	else if (!strcmp(res->value1, "100000"))
+		link_speed = ETH_LINK_SPEED_100G;
 	else if (!strcmp(res->value1, "auto"))
 		link_speed = ETH_LINK_SPEED_AUTONEG;
 	else {
@@ -1002,7 +1004,7 @@ cmd_config_speed_specific_parsed(void *parsed_result,
 				__attribute__((unused)) void *data)
 {
 	struct cmd_config_speed_specific *res = parsed_result;
-	uint16_t link_speed = ETH_LINK_SPEED_AUTONEG;
+	uint32_t link_speed = ETH_LINK_SPEED_AUTONEG;
 	uint16_t link_duplex = 0;
 
 	if (!all_ports_stopped()) {
@@ -1023,6 +1025,8 @@ cmd_config_speed_specific_parsed(void *parsed_result,
 		link_speed = ETH_LINK_SPEED_10000;
 	else if (!strcmp(res->value1, "40000"))
 		link_speed = ETH_LINK_SPEED_40G;
+	else if (!strcmp(res->value1, "100000"))
+		link_speed = ETH_LINK_SPEED_100G;
 	else if (!strcmp(res->value1, "auto"))
 		link_speed = ETH_LINK_SPEED_AUTONEG;
 	else {
