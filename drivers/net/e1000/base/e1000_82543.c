@@ -1194,7 +1194,8 @@ STATIC s32 e1000_check_for_copper_link_82543(struct e1000_hw *hw)
 	struct e1000_mac_info *mac = &hw->mac;
 	u32 icr, rctl;
 	s32 ret_val;
-	u16 speed, duplex;
+	u32 speed;
+	u16 duplex;
 	bool link;
 
 	DEBUGFUNC("e1000_check_for_copper_link_82543");
