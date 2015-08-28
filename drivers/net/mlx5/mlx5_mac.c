@@ -115,8 +115,8 @@ hash_rxq_del_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	      (void *)hash_rxq,
 	      (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5],
 	      mac_index, priv->vlan_filter[vlan_index].id);
-	claim_zero(ibv_destroy_flow(hash_rxq->mac_flow
-				    [mac_index][vlan_index]));
+	claim_zero(ibv_exp_destroy_flow(hash_rxq->mac_flow
+					[mac_index][vlan_index]));
 	hash_rxq->mac_flow[mac_index][vlan_index] = NULL;
 }
 
@@ -248,15 +248,15 @@ static int
 hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 		  unsigned int vlan_index)
 {
-	struct ibv_flow *flow;
+	struct ibv_exp_flow *flow;
 	struct priv *priv = hash_rxq->priv;
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 			(const uint8_t (*)[ETHER_ADDR_LEN])
 			priv->mac[mac_index].addr_bytes;
 	FLOW_ATTR_SPEC_ETH(data, priv_populate_flow_attr(priv, NULL, 0,
 							 hash_rxq->type));
-	struct ibv_flow_attr *attr = &data->attr;
-	struct ibv_flow_spec_eth *spec = &data->spec;
+	struct ibv_exp_flow_attr *attr = &data->attr;
+	struct ibv_exp_flow_spec_eth *spec = &data->spec;
 
 	assert(mac_index < elemof(priv->mac));
 	assert((vlan_index < elemof(priv->vlan_filter)) || (vlan_index == -1u));
@@ -267,10 +267,10 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	assert(((uint8_t *)attr + sizeof(*attr)) == (uint8_t *)spec);
 	priv_populate_flow_attr(priv, attr, sizeof(data), hash_rxq->type);
 	/* The first specification must be Ethernet. */
-	assert(spec->type == IBV_FLOW_SPEC_ETH);
+	assert(spec->type == IBV_EXP_FLOW_SPEC_ETH);
 	assert(spec->size == sizeof(*spec));
-	*spec = (struct ibv_flow_spec_eth){
-		.type = IBV_FLOW_SPEC_ETH,
+	*spec = (struct ibv_exp_flow_spec_eth){
+		.type = IBV_EXP_FLOW_SPEC_ETH,
 		.size = sizeof(*spec),
 		.val = {
 			.dst_mac = {
@@ -295,7 +295,7 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	      ((vlan_index != -1u) ? priv->vlan_filter[vlan_index].id : -1u));
 	/* Create related flow. */
 	errno = 0;
-	flow = ibv_create_flow(hash_rxq->qp, attr);
+	flow = ibv_exp_create_flow(hash_rxq->qp, attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",

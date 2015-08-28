@@ -73,7 +73,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_TCP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_TCP,
+			.type = IBV_EXP_FLOW_SPEC_TCP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
@@ -86,7 +86,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_UDP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_UDP,
+			.type = IBV_EXP_FLOW_SPEC_UDP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
@@ -98,7 +98,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				ETH_RSS_FRAG_IPV4),
 		.flow_priority = 1,
 		.flow_spec.ipv4 = {
-			.type = IBV_FLOW_SPEC_IPV4,
+			.type = IBV_EXP_FLOW_SPEC_IPV4,
 			.size = sizeof(hash_rxq_init[0].flow_spec.ipv4),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
@@ -112,7 +112,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_TCP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_TCP,
+			.type = IBV_EXP_FLOW_SPEC_TCP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
@@ -125,7 +125,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_UDP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_UDP,
+			.type = IBV_EXP_FLOW_SPEC_UDP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
@@ -137,7 +137,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				ETH_RSS_FRAG_IPV6),
 		.flow_priority = 1,
 		.flow_spec.ipv6 = {
-			.type = IBV_FLOW_SPEC_IPV6,
+			.type = IBV_EXP_FLOW_SPEC_IPV6,
 			.size = sizeof(hash_rxq_init[0].flow_spec.ipv6),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
@@ -148,7 +148,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = 0,
 		.flow_priority = 2,
 		.flow_spec.eth = {
-			.type = IBV_FLOW_SPEC_ETH,
+			.type = IBV_EXP_FLOW_SPEC_ETH,
 			.size = sizeof(hash_rxq_init[0].flow_spec.eth),
 		},
 		.underlayer = NULL,
@@ -237,7 +237,7 @@ const size_t rss_hash_default_key_len = sizeof(rss_hash_default_key);
  */
 size_t
 priv_populate_flow_attr(const struct priv *priv,
-			struct ibv_flow_attr *flow_attr,
+			struct ibv_exp_flow_attr *flow_attr,
 			size_t flow_attr_size,
 			enum hash_rxq_type type)
 {
@@ -253,8 +253,8 @@ priv_populate_flow_attr(const struct priv *priv,
 		return offset;
 	flow_attr_size = offset;
 	init = &hash_rxq_init[type];
-	*flow_attr = (struct ibv_flow_attr){
-		.type = IBV_FLOW_ATTR_NORMAL,
+	*flow_attr = (struct ibv_exp_flow_attr){
+		.type = IBV_EXP_FLOW_ATTR_NORMAL,
 		.priority = init->flow_priority,
 		.num_of_specs = 0,
 		.port = priv->port,
