@@ -241,7 +241,7 @@ struct hash_rxq_init {
 	uint64_t hash_fields; /* Fields that participate in the hash. */
 	uint64_t dpdk_rss_hf; /* Matching DPDK RSS hash fields. */
 	unsigned int flow_priority; /* Flow priority to use. */
-	struct ibv_flow_spec flow_spec; /* Flow specification template. */
+	struct ibv_exp_flow_spec flow_spec; /* Flow specification template. */
 	const struct hash_rxq_init *underlayer; /* Pointer to underlayer. */
 };
 
@@ -265,9 +265,9 @@ struct hash_rxq {
 	enum hash_rxq_type type; /* Hash RX queue type. */
 	/* Each VLAN ID requires a separate flow steering rule. */
 	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
-	struct ibv_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
-	struct ibv_flow *promisc_flow; /* Promiscuous flow. */
-	struct ibv_flow *allmulti_flow; /* Multicast flow. */
+	struct ibv_exp_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
+	struct ibv_exp_flow *promisc_flow; /* Promiscuous flow. */
+	struct ibv_exp_flow *allmulti_flow; /* Multicast flow. */
 };
 
 struct priv {
@@ -325,7 +325,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_TCP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_TCP,
+			.type = IBV_EXP_FLOW_SPEC_TCP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
@@ -338,7 +338,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_UDP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_UDP,
+			.type = IBV_EXP_FLOW_SPEC_UDP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
@@ -350,7 +350,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				ETH_RSS_FRAG_IPV4),
 		.flow_priority = 1,
 		.flow_spec.ipv4 = {
-			.type = IBV_FLOW_SPEC_IPV4,
+			.type = IBV_EXP_FLOW_SPEC_IPV4,
 			.size = sizeof(hash_rxq_init[0].flow_spec.ipv4),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
@@ -364,7 +364,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_TCP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_TCP,
+			.type = IBV_EXP_FLOW_SPEC_TCP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
@@ -377,7 +377,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_UDP,
 		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
-			.type = IBV_FLOW_SPEC_UDP,
+			.type = IBV_EXP_FLOW_SPEC_UDP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
@@ -389,7 +389,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				ETH_RSS_FRAG_IPV6),
 		.flow_priority = 1,
 		.flow_spec.ipv6 = {
-			.type = IBV_FLOW_SPEC_IPV6,
+			.type = IBV_EXP_FLOW_SPEC_IPV6,
 			.size = sizeof(hash_rxq_init[0].flow_spec.ipv6),
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
@@ -400,7 +400,7 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = 0,
 		.flow_priority = 2,
 		.flow_spec.eth = {
-			.type = IBV_FLOW_SPEC_ETH,
+			.type = IBV_EXP_FLOW_SPEC_ETH,
 			.size = sizeof(hash_rxq_init[0].flow_spec.eth),
 		},
 		.underlayer = NULL,
@@ -466,8 +466,8 @@ static uint8_t rss_hash_default_key[] = {
 /* Flow structure with Ethernet specification. It is packed to prevent padding
  * between attr and spec as this layout is expected by libibverbs. */
 struct flow_attr_spec_eth {
-	struct ibv_flow_attr attr;
-	struct ibv_flow_spec_eth spec;
+	struct ibv_exp_flow_attr attr;
+	struct ibv_exp_flow_spec_eth spec;
 } __attribute__((packed));
 
 /* Define a struct flow_attr_spec_eth object as an array of at least
@@ -2345,8 +2345,8 @@ hash_rxq_del_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	      (void *)hash_rxq,
 	      (*mac)[0], (*mac)[1], (*mac)[2], (*mac)[3], (*mac)[4], (*mac)[5],
 	      mac_index, priv->vlan_filter[vlan_index].id);
-	claim_zero(ibv_destroy_flow(hash_rxq->mac_flow
-				    [mac_index][vlan_index]));
+	claim_zero(ibv_exp_destroy_flow(hash_rxq->mac_flow
+					[mac_index][vlan_index]));
 	hash_rxq->mac_flow[mac_index][vlan_index] = NULL;
 }
 
@@ -2431,7 +2431,7 @@ priv_mac_addrs_disable(struct priv *priv)
  */
 static size_t
 priv_populate_flow_attr(const struct priv *priv,
-			struct ibv_flow_attr *flow_attr,
+			struct ibv_exp_flow_attr *flow_attr,
 			size_t flow_attr_size,
 			enum hash_rxq_type type)
 {
@@ -2447,8 +2447,8 @@ priv_populate_flow_attr(const struct priv *priv,
 		return offset;
 	flow_attr_size = offset;
 	init = &hash_rxq_init[type];
-	*flow_attr = (struct ibv_flow_attr){
-		.type = IBV_FLOW_ATTR_NORMAL,
+	*flow_attr = (struct ibv_exp_flow_attr){
+		.type = IBV_EXP_FLOW_ATTR_NORMAL,
 		.priority = init->flow_priority,
 		.num_of_specs = 0,
 		.port = priv->port,
@@ -2482,15 +2482,15 @@ static int
 hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 		  unsigned int vlan_index)
 {
-	struct ibv_flow *flow;
+	struct ibv_exp_flow *flow;
 	struct priv *priv = hash_rxq->priv;
 	const uint8_t (*mac)[ETHER_ADDR_LEN] =
 			(const uint8_t (*)[ETHER_ADDR_LEN])
 			priv->mac[mac_index].addr_bytes;
 	FLOW_ATTR_SPEC_ETH(data, priv_populate_flow_attr(priv, NULL, 0,
 							 hash_rxq->type));
-	struct ibv_flow_attr *attr = &data->attr;
-	struct ibv_flow_spec_eth *spec = &data->spec;
+	struct ibv_exp_flow_attr *attr = &data->attr;
+	struct ibv_exp_flow_spec_eth *spec = &data->spec;
 
 	assert(mac_index < elemof(priv->mac));
 	assert((vlan_index < elemof(priv->vlan_filter)) || (vlan_index == -1u));
@@ -2501,10 +2501,10 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	assert(((uint8_t *)attr + sizeof(*attr)) == (uint8_t *)spec);
 	priv_populate_flow_attr(priv, attr, sizeof(data), hash_rxq->type);
 	/* The first specification must be Ethernet. */
-	assert(spec->type == IBV_FLOW_SPEC_ETH);
+	assert(spec->type == IBV_EXP_FLOW_SPEC_ETH);
 	assert(spec->size == sizeof(*spec));
-	*spec = (struct ibv_flow_spec_eth){
-		.type = IBV_FLOW_SPEC_ETH,
+	*spec = (struct ibv_exp_flow_spec_eth){
+		.type = IBV_EXP_FLOW_SPEC_ETH,
 		.size = sizeof(*spec),
 		.val = {
 			.dst_mac = {
@@ -2529,7 +2529,7 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	      ((vlan_index != -1u) ? priv->vlan_filter[vlan_index].id : -1u));
 	/* Create related flow. */
 	errno = 0;
-	flow = ibv_create_flow(hash_rxq->qp, attr);
+	flow = ibv_exp_create_flow(hash_rxq->qp, attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
@@ -2759,9 +2759,9 @@ end:
 static int
 hash_rxq_allmulticast_enable(struct hash_rxq *hash_rxq)
 {
-	struct ibv_flow *flow;
-	struct ibv_flow_attr attr = {
-		.type = IBV_FLOW_ATTR_MC_DEFAULT,
+	struct ibv_exp_flow *flow;
+	struct ibv_exp_flow_attr attr = {
+		.type = IBV_EXP_FLOW_ATTR_MC_DEFAULT,
 		.num_of_specs = 0,
 		.port = hash_rxq->priv->port,
 		.flags = 0
@@ -2771,7 +2771,7 @@ hash_rxq_allmulticast_enable(struct hash_rxq *hash_rxq)
 	if (hash_rxq->allmulti_flow != NULL)
 		return EBUSY;
 	errno = 0;
-	flow = ibv_create_flow(hash_rxq->qp, &attr);
+	flow = ibv_exp_create_flow(hash_rxq->qp, &attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
@@ -2834,7 +2834,7 @@ hash_rxq_allmulticast_disable(struct hash_rxq *hash_rxq)
 	DEBUG("%p: disabling allmulticast mode", (void *)hash_rxq);
 	if (hash_rxq->allmulti_flow == NULL)
 		return;
-	claim_zero(ibv_destroy_flow(hash_rxq->allmulti_flow));
+	claim_zero(ibv_exp_destroy_flow(hash_rxq->allmulti_flow));
 	hash_rxq->allmulti_flow = NULL;
 	DEBUG("%p: allmulticast mode disabled", (void *)hash_rxq);
 }
@@ -2869,11 +2869,11 @@ priv_allmulticast_disable(struct priv *priv)
 static int
 hash_rxq_promiscuous_enable(struct hash_rxq *hash_rxq)
 {
-	struct ibv_flow *flow;
+	struct ibv_exp_flow *flow;
 	struct priv *priv = hash_rxq->priv;
 	FLOW_ATTR_SPEC_ETH(data, priv_populate_flow_attr(priv, NULL, 0,
 							 hash_rxq->type));
-	struct ibv_flow_attr *attr = &data->attr;
+	struct ibv_exp_flow_attr *attr = &data->attr;
 
 	if (hash_rxq->priv->vf)
 		return 0;
@@ -2884,7 +2884,7 @@ hash_rxq_promiscuous_enable(struct hash_rxq *hash_rxq)
 	 * on specific MAC addresses. */
 	priv_populate_flow_attr(priv, attr, sizeof(data), hash_rxq->type);
 	errno = 0;
-	flow = ibv_create_flow(hash_rxq->qp, attr);
+	flow = ibv_exp_create_flow(hash_rxq->qp, attr);
 	if (flow == NULL) {
 		/* It's not clear whether errno is always set in this case. */
 		ERROR("%p: flow configuration failed, errno=%d: %s",
@@ -2954,7 +2954,7 @@ hash_rxq_promiscuous_disable(struct hash_rxq *hash_rxq)
 	DEBUG("%p: disabling promiscuous mode", (void *)hash_rxq);
 	if (hash_rxq->promisc_flow == NULL)
 		return;
-	claim_zero(ibv_destroy_flow(hash_rxq->promisc_flow));
+	claim_zero(ibv_exp_destroy_flow(hash_rxq->promisc_flow));
 	hash_rxq->promisc_flow = NULL;
 	DEBUG("%p: promiscuous mode disabled", (void *)hash_rxq);
 }
