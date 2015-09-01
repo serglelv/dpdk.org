@@ -3554,12 +3554,6 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		assert(err > 0);
 		return err;
 	}
-	err = ibv_resize_cq(tmpl.cq, desc_n);
-	if (err) {
-		ERROR("%p: cannot resize CQ: %s", (void *)dev, strerror(err));
-		assert(err > 0);
-		return err;
-	}
 	/* Allocate pool. */
 	pool = rte_malloc(__func__, (mbuf_n * sizeof(*pool)), 0);
 	if (pool == NULL) {
@@ -3700,6 +3694,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	struct rte_mbuf *buf;
 	int ret = 0;
 	unsigned int i;
+	unsigned int cq_size = desc;
 
 	(void)conf; /* Thresholds configuration (ignored). */
 	if ((desc == 0) || (desc % MLX5_PMD_SGE_WR_N)) {
@@ -3761,7 +3756,8 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
 		.res_domain = tmpl.rd,
 	};
-	tmpl.cq = ibv_exp_create_cq(priv->ctx, desc, NULL, NULL, 0, &attr.cq);
+	tmpl.cq = ibv_exp_create_cq(priv->ctx, cq_size, NULL, NULL, 0,
+				    &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
 		ERROR("%p: CQ creation failure: %s",
@@ -3776,9 +3772,9 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		.wq_context = NULL, /* Could be useful in the future. */
 		.wq_type = IBV_EXP_WQT_RQ,
 		/* Max number of outstanding WRs. */
-		.max_recv_wr = ((priv->device_attr.max_qp_wr < desc) ?
+		.max_recv_wr = ((priv->device_attr.max_qp_wr < (int)cq_size) ?
 				priv->device_attr.max_qp_wr :
-				desc),
+				(int)cq_size),
 		/* Max number of scatter/gather elements in a WR. */
 		.max_recv_sge = ((priv->device_attr.max_sge <
 				  MLX5_PMD_SGE_WR_N) ?
