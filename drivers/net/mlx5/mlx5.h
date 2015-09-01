@@ -1,8 +1,8 @@
 /*-
  *   BSD LICENSE
  *
- *   Copyright 2012-2015 6WIND S.A.
- *   Copyright 2012 Mellanox.
+ *   Copyright 2015 6WIND S.A.
+ *   Copyright 2015 Mellanox.
  *
  *   Redistribution and use in source and binary forms, with or without
  *   modification, are permitted provided that the following conditions
@@ -37,51 +37,35 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <limits.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <linux/if.h>
 
-/*
- * Maximum number of simultaneous MAC addresses supported.
- *
- * According to ConnectX's Programmer Reference Manual:
- *   The L2 Address Match is implemented by comparing a MAC/VLAN combination
- *   of 128 MAC addresses and 127 VLAN values, comprising 128x127 possible
- *   L2 addresses.
- */
-#define MLX5_MAX_MAC_ADDRESSES 128
-
-/* Maximum number of simultaneous VLAN filters supported. See above. */
-#define MLX5_MAX_VLAN_IDS 127
-
-/* Request send completion once in every 64 sends, might be less. */
-#define MLX5_PMD_TX_PER_COMP_REQ 64
-
-/* Maximum number of Scatter/Gather Elements per Work Request. */
-#ifndef MLX5_PMD_SGE_WR_N
-#define MLX5_PMD_SGE_WR_N 4
+/* Verbs header. */
+/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
+#ifdef PEDANTIC
+#pragma GCC diagnostic ignored "-pedantic"
+#endif
+#include <infiniband/verbs.h>
+#ifdef PEDANTIC
+#pragma GCC diagnostic error "-pedantic"
 #endif
 
-/* Maximum size for inline data. */
-#ifndef MLX5_PMD_MAX_INLINE
-#define MLX5_PMD_MAX_INLINE 0
+/* DPDK headers don't like -pedantic. */
+#ifdef PEDANTIC
+#pragma GCC diagnostic ignored "-pedantic"
+#endif
+#include <rte_ether.h>
+#include <rte_ethdev.h>
+#include <rte_spinlock.h>
+#ifdef PEDANTIC
+#pragma GCC diagnostic error "-pedantic"
 #endif
 
-/*
- * Maximum number of cached Memory Pools (MPs) per TX queue. Each RTE MP
- * from which buffers are to be transmitted will have to be mapped by this
- * driver to their own Memory Region (MR). This is a slow operation.
- *
- * This value is always 1 for RX queues.
- */
-#ifndef MLX5_PMD_TX_MP_CACHE
-#define MLX5_PMD_TX_MP_CACHE 8
-#endif
-
-/*
- * If defined, only use software counters. The PMD will never ask the hardware
- * for these, and many of them won't be available.
- */
-#ifndef MLX5_PMD_SOFT_COUNTERS
-#define MLX5_PMD_SOFT_COUNTERS 1
-#endif
+#include "mlx5_utils.h"
+#include "mlx5_rxtx.h"
+#include "mlx5_autoconf.h"
+#include "mlx5_defs.h"
 
 enum {
 	PCI_VENDOR_ID_MELLANOX = 0x15b3,
@@ -95,66 +79,142 @@ enum {
 
 #define MLX5_DRIVER_NAME "librte_pmd_mlx5"
 
-/* Bit-field manipulation. */
-#define BITFIELD_DECLARE(bf, type, size)				\
-	type bf[(((size_t)(size) / (sizeof(type) * CHAR_BIT)) +		\
-		 !!((size_t)(size) % (sizeof(type) * CHAR_BIT)))]
-#define BITFIELD_DEFINE(bf, type, size)					\
-	BITFIELD_DECLARE((bf), type, (size)) = { 0 }
-#define BITFIELD_SET(bf, b)						\
-	(assert((size_t)(b) < (sizeof(bf) * CHAR_BIT)),			\
-	 (void)((bf)[((b) / (sizeof((bf)[0]) * CHAR_BIT))] |=		\
-		((size_t)1 << ((b) % (sizeof((bf)[0]) * CHAR_BIT)))))
-#define BITFIELD_RESET(bf, b)						\
-	(assert((size_t)(b) < (sizeof(bf) * CHAR_BIT)),			\
-	 (void)((bf)[((b) / (sizeof((bf)[0]) * CHAR_BIT))] &=		\
-		~((size_t)1 << ((b) % (sizeof((bf)[0]) * CHAR_BIT)))))
-#define BITFIELD_ISSET(bf, b)						\
-	(assert((size_t)(b) < (sizeof(bf) * CHAR_BIT)),			\
-	 !!(((bf)[((b) / (sizeof((bf)[0]) * CHAR_BIT))] &		\
-	     ((size_t)1 << ((b) % (sizeof((bf)[0]) * CHAR_BIT))))))
-
-/* Number of elements in array. */
-#define elemof(a) (sizeof(a) / sizeof((a)[0]))
-
-/* Cast pointer p to structure member m to its parent structure of type t. */
-#define containerof(p, t, m) ((t *)((uint8_t *)(p) - offsetof(t, m)))
-
-/* Branch prediction helpers. */
-#ifndef likely
-#define likely(c) __builtin_expect(!!(c), 1)
+struct priv {
+	struct rte_eth_dev *dev; /* Ethernet device. */
+	struct ibv_context *ctx; /* Verbs context. */
+	struct ibv_device_attr device_attr; /* Device properties. */
+	struct ibv_pd *pd; /* Protection Domain. */
+	/*
+	 * MAC addresses array and configuration bit-field.
+	 * An extra entry that cannot be modified by the DPDK is reserved
+	 * for broadcast frames (destination MAC address ff:ff:ff:ff:ff:ff).
+	 */
+	struct ether_addr mac[MLX5_MAX_MAC_ADDRESSES];
+	BITFIELD_DECLARE(mac_configured, uint32_t, MLX5_MAX_MAC_ADDRESSES);
+	/* VLAN filters. */
+	struct {
+		unsigned int enabled:1; /* If enabled. */
+		unsigned int id:12; /* VLAN ID (0-4095). */
+	} vlan_filter[MLX5_MAX_VLAN_IDS]; /* VLAN filters table. */
+	/* Device properties. */
+	uint16_t mtu; /* Configured MTU. */
+	uint8_t port; /* Physical port number. */
+	unsigned int started:1; /* Device started, flows enabled. */
+	unsigned int promisc:1; /* Device in promiscuous mode. */
+	unsigned int allmulti:1; /* Device receives all multicast packets. */
+	unsigned int hw_qpg:1; /* QP groups are supported. */
+	unsigned int hw_tss:1; /* TSS is supported. */
+	unsigned int hw_rss:1; /* RSS is supported. */
+	unsigned int hw_csum:1; /* Checksum offload is supported. */
+	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
+	unsigned int rss:1; /* RSS is enabled. */
+	unsigned int vf:1; /* This is a VF device. */
+#ifdef INLINE_RECV
+	unsigned int inl_recv_size; /* Inline recv size */
 #endif
-#ifndef unlikely
-#define unlikely(c) __builtin_expect(!!(c), 0)
-#endif
+	unsigned int max_rss_tbl_sz; /* Maximum number of RSS queues. */
+	/* RX/TX queues. */
+	struct rxq rxq_parent; /* Parent queue when RSS is enabled. */
+	unsigned int rxqs_n; /* RX queues array size. */
+	unsigned int txqs_n; /* TX queues array size. */
+	struct rxq *(*rxqs)[]; /* RX queues. */
+	struct txq *(*txqs)[]; /* TX queues. */
+	rte_spinlock_t lock; /* Lock for control functions. */
+};
 
-/* Debugging */
-#ifndef NDEBUG
-#include <stdio.h>
-#define DEBUG__(m, ...)						\
-	(fprintf(stderr, "%s:%d: %s(): " m "%c",		\
-		 __FILE__, __LINE__, __func__, __VA_ARGS__),	\
-	 fflush(stderr),					\
-	 (void)0)
-/*
- * Save/restore errno around DEBUG__().
- * XXX somewhat undefined behavior, but works.
+/* Work Request ID data type (64 bit). */
+typedef union {
+	struct {
+		uint32_t id;
+		uint16_t offset;
+	} data;
+	uint64_t raw;
+} wr_id_t;
+
+/* Compile-time check. */
+static inline void wr_id_t_check(void)
+{
+	wr_id_t check[1 + (2 * -!(sizeof(wr_id_t) == sizeof(uint64_t)))];
+
+	(void)check;
+	(void)wr_id_t_check;
+}
+
+/**
+ * Lock private structure to protect it from concurrent access in the
+ * control path.
+ *
+ * @param priv
+ *   Pointer to private structure.
  */
-#define DEBUG_(...)				\
-	(errno = ((int []){			\
-		*(volatile int *)&errno,	\
-		(DEBUG__(__VA_ARGS__), 0)	\
-	})[0])
-#define DEBUG(...) DEBUG_(__VA_ARGS__, '\n')
-#define claim_zero(...) assert((__VA_ARGS__) == 0)
-#define claim_nonzero(...) assert((__VA_ARGS__) != 0)
-#define claim_positive(...) assert((__VA_ARGS__) >= 0)
-#else /* NDEBUG */
-/* No-ops. */
-#define DEBUG(...) (void)0
-#define claim_zero(...) (__VA_ARGS__)
-#define claim_nonzero(...) (__VA_ARGS__)
-#define claim_positive(...) (__VA_ARGS__)
-#endif /* NDEBUG */
+static inline void
+priv_lock(struct priv *priv)
+{
+	rte_spinlock_lock(&priv->lock);
+}
+
+/**
+ * Unlock private structure.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ */
+static inline void
+priv_unlock(struct priv *priv)
+{
+	rte_spinlock_unlock(&priv->lock);
+}
+
+/* mlx5_ethdev.c */
+
+int priv_get_ifname(const struct priv *, char (*)[IF_NAMESIZE]);
+int priv_ifreq(const struct priv *, int req, struct ifreq *);
+int priv_get_mtu(struct priv *, uint16_t *);
+int priv_set_flags(struct priv *, unsigned int, unsigned int);
+int mlx5_dev_configure(struct rte_eth_dev *);
+void mlx5_dev_infos_get(struct rte_eth_dev *, struct rte_eth_dev_info *);
+int mlx5_link_update(struct rte_eth_dev *, int);
+int mlx5_dev_set_mtu(struct rte_eth_dev *, uint16_t);
+int mlx5_dev_get_flow_ctrl(struct rte_eth_dev *, struct rte_eth_fc_conf *);
+int mlx5_dev_set_flow_ctrl(struct rte_eth_dev *, struct rte_eth_fc_conf *);
+int mlx5_ibv_device_to_pci_addr(const struct ibv_device *,
+				struct rte_pci_addr *);
+int mlx5_getenv_int(const char *);
+
+/* mlx5_mac.c */
+
+int priv_get_mac(struct priv *, uint8_t (*)[ETHER_ADDR_LEN]);
+void rxq_mac_addrs_del(struct rxq *);
+void mlx5_mac_addr_remove(struct rte_eth_dev *, uint32_t);
+int rxq_mac_addrs_add(struct rxq *);
+int priv_mac_addr_add(struct priv *, unsigned int,
+		      const uint8_t (*)[ETHER_ADDR_LEN]);
+void mlx5_mac_addr_add(struct rte_eth_dev *, struct ether_addr *, uint32_t,
+		       uint32_t);
+
+/* mlx5_trigger.c */
+
+int mlx5_dev_start(struct rte_eth_dev *);
+void mlx5_dev_stop(struct rte_eth_dev *);
+
+/* mlx5_rxmode.c */
+
+int rxq_promiscuous_enable(struct rxq *);
+void mlx5_promiscuous_enable(struct rte_eth_dev *);
+void rxq_promiscuous_disable(struct rxq *);
+void mlx5_promiscuous_disable(struct rte_eth_dev *);
+int rxq_allmulticast_enable(struct rxq *);
+void mlx5_allmulticast_enable(struct rte_eth_dev *);
+void rxq_allmulticast_disable(struct rxq *);
+void mlx5_allmulticast_disable(struct rte_eth_dev *);
+
+/* mlx5_stats.c */
+
+void mlx5_stats_get(struct rte_eth_dev *, struct rte_eth_stats *);
+void mlx5_stats_reset(struct rte_eth_dev *);
+
+/* mlx5_vlan.c */
+
+int mlx5_vlan_filter_set(struct rte_eth_dev *, uint16_t, int);
 
 #endif /* RTE_PMD_MLX5_H_ */

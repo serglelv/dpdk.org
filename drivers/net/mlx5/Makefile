@@ -1,7 +1,7 @@
 #   BSD LICENSE
 #
-#   Copyright 2012-2015 6WIND S.A.
-#   Copyright 2012 Mellanox.
+#   Copyright 2015 6WIND S.A.
+#   Copyright 2015 Mellanox.
 #
 #   Redistribution and use in source and binary forms, with or without
 #   modification, are permitted provided that the following conditions
@@ -36,6 +36,15 @@ LIB = librte_pmd_mlx5.a
 
 # Sources.
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxq.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_txq.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxtx.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_trigger.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_ethdev.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_mac.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxmode.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_vlan.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_stats.c
 
 # Dependencies.
 DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_ether
