@@ -979,7 +979,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	/* Post SGEs. */
 	assert(tmpl.if_wq != NULL);
 	if (tmpl.sp) {
-		struct rxq_elt_sp (*elts)[rxq->elts_n] = tmpl.elts.sp;
+		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
 			err = tmpl.if_wq->recv_sg_list
@@ -990,7 +990,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 				break;
 		}
 	} else {
-		struct rxq_elt (*elts)[rxq->elts_n] = tmpl.elts.no_sp;
+		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
 
 		for (i = 0; (i != elemof(*elts)); ++i) {
 			err = tmpl.if_wq->recv_burst(
