@@ -113,11 +113,6 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		HAVE_EXP_QUERY_DEVICE \
 		infiniband/verbs.h \
 		type 'struct ibv_exp_device_attr' $(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
-		HAVE_EXP_QP_BURST_CREATE_DISABLE_ETH_LOOPBACK \
-		infiniband/verbs.h \
-		enum IBV_EXP_QP_BURST_CREATE_DISABLE_ETH_LOOPBACK \
-		$(AUTOCONF_OUTPUT)
 
 mlx5.o: mlx5_autoconf.h
 
