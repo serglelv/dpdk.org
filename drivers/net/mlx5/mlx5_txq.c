@@ -384,6 +384,7 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	};
 	tmpl.if_cq = ibv_exp_query_intf(priv->ctx, &attr.params, &status);
 	if (tmpl.if_cq == NULL) {
+		ret = EINVAL;
 		ERROR("%p: CQ interface family query failed with status %d",
 		      (void *)dev, status);
 		goto error;
@@ -402,6 +403,7 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	};
 	tmpl.if_qp = ibv_exp_query_intf(priv->ctx, &attr.params, &status);
 	if (tmpl.if_qp == NULL) {
+		ret = EINVAL;
 		ERROR("%p: QP interface family query failed with status %d",
 		      (void *)dev, status);
 		goto error;
