@@ -324,9 +324,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_TCP,
 		.flow_priority = 0,
-		.flow_spec.tcp_udp = {
-			.type = IBV_EXP_FLOW_SPEC_TCP,
-			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		.flow_spec = {
+			{.tcp_udp = {
+				.type = IBV_EXP_FLOW_SPEC_TCP,
+				.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+			}},
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
 	},
@@ -337,9 +339,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_UDP,
 		.flow_priority = 0,
-		.flow_spec.tcp_udp = {
-			.type = IBV_EXP_FLOW_SPEC_UDP,
-			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		.flow_spec = {
+			{.tcp_udp = {
+				.type = IBV_EXP_FLOW_SPEC_UDP,
+				.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+			}},
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv4],
 	},
@@ -349,9 +353,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = (ETH_RSS_IPV4 |
 				ETH_RSS_FRAG_IPV4),
 		.flow_priority = 1,
-		.flow_spec.ipv4 = {
-			.type = IBV_EXP_FLOW_SPEC_IPV4,
-			.size = sizeof(hash_rxq_init[0].flow_spec.ipv4),
+		.flow_spec = {
+			{.ipv4 = {
+				.type = IBV_EXP_FLOW_SPEC_IPV4,
+				.size = sizeof(hash_rxq_init[0].flow_spec.ipv4),
+			}},
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
 	},
@@ -363,9 +369,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_TCP,
 		.flow_priority = 0,
-		.flow_spec.tcp_udp = {
-			.type = IBV_EXP_FLOW_SPEC_TCP,
-			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		.flow_spec = {
+			{.tcp_udp = {
+				.type = IBV_EXP_FLOW_SPEC_TCP,
+				.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+			}},
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
 	},
@@ -376,9 +384,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_UDP,
 		.flow_priority = 0,
-		.flow_spec.tcp_udp = {
-			.type = IBV_EXP_FLOW_SPEC_UDP,
-			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+		.flow_spec = {
+			{.tcp_udp = {
+				.type = IBV_EXP_FLOW_SPEC_UDP,
+				.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
+			}},
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_IPv6],
 	},
@@ -388,9 +398,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.dpdk_rss_hf = (ETH_RSS_IPV6 |
 				ETH_RSS_FRAG_IPV6),
 		.flow_priority = 1,
-		.flow_spec.ipv6 = {
-			.type = IBV_EXP_FLOW_SPEC_IPV6,
-			.size = sizeof(hash_rxq_init[0].flow_spec.ipv6),
+		.flow_spec = {
+			{.ipv6 = {
+				.type = IBV_EXP_FLOW_SPEC_IPV6,
+				.size = sizeof(hash_rxq_init[0].flow_spec.ipv6),
+			}},
 		},
 		.underlayer = &hash_rxq_init[HASH_RXQ_ETH],
 	},
@@ -399,9 +411,11 @@ static const struct hash_rxq_init hash_rxq_init[] = {
 		.hash_fields = 0,
 		.dpdk_rss_hf = 0,
 		.flow_priority = 2,
-		.flow_spec.eth = {
-			.type = IBV_EXP_FLOW_SPEC_ETH,
-			.size = sizeof(hash_rxq_init[0].flow_spec.eth),
+		.flow_spec = {
+			{.eth = {
+				.type = IBV_EXP_FLOW_SPEC_ETH,
+				.size = sizeof(hash_rxq_init[0].flow_spec.eth),
+			}},
 		},
 		.underlayer = NULL,
 	},
