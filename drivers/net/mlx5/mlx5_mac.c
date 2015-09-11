@@ -93,7 +93,7 @@ priv_get_mac(struct priv *priv, uint8_t (*mac)[ETHER_ADDR_LEN])
  * Delete flow steering rule.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  * @param mac_index
  *   MAC address index.
  * @param vlan_index
@@ -121,10 +121,10 @@ hash_rxq_del_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 }
 
 /**
- * Unregister a MAC address from a RX hash queue.
+ * Unregister a MAC address from a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  * @param mac_index
  *   MAC address index.
  */
@@ -151,10 +151,10 @@ hash_rxq_mac_addr_del(struct hash_rxq *hash_rxq, unsigned int mac_index)
 }
 
 /**
- * Unregister all MAC addresses from a RX hash queue.
+ * Unregister all MAC addresses from a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  */
 void
 hash_rxq_mac_addrs_del(struct hash_rxq *hash_rxq)
@@ -169,7 +169,7 @@ hash_rxq_mac_addrs_del(struct hash_rxq *hash_rxq)
 /**
  * Unregister a MAC address.
  *
- * This is done for each RX hash queue.
+ * This is done for each hash RX queue.
  *
  * @param priv
  *   Pointer to private structure.
@@ -190,7 +190,7 @@ priv_mac_addr_del(struct priv *priv, unsigned int mac_index)
 }
 
 /**
- * Unregister all MAC addresses from all RX hash queues.
+ * Unregister all MAC addresses from all hash RX queues.
  *
  * @param priv
  *   Pointer to private structure.
@@ -235,7 +235,7 @@ end:
  * Add single flow steering rule.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  * @param mac_index
  *   MAC address index to register.
  * @param vlan_index
@@ -313,10 +313,10 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 }
 
 /**
- * Register a MAC address in a RX hash queue.
+ * Register a MAC address in a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  * @param mac_index
  *   MAC address index to register.
  *
@@ -362,10 +362,10 @@ hash_rxq_mac_addr_add(struct hash_rxq *hash_rxq, unsigned int mac_index)
 }
 
 /**
- * Register all MAC addresses in a RX hash queue.
+ * Register all MAC addresses in a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX queue structure.
+ *   Pointer to hash RX queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
@@ -395,7 +395,7 @@ hash_rxq_mac_addrs_add(struct hash_rxq *hash_rxq)
 /**
  * Register a MAC address.
  *
- * This is done for each RX hash queue.
+ * This is done for each hash RX queue.
  *
  * @param priv
  *   Pointer to private structure.
@@ -438,7 +438,7 @@ priv_mac_addr_add(struct priv *priv, unsigned int mac_index,
 	/* If device isn't started, this is all we need to do. */
 	if (!priv->started) {
 #ifndef NDEBUG
-		/* Verify that all RX hash queues have this index disabled. */
+		/* Verify that all hash RX queues have this index disabled. */
 		for (i = 0; (i != priv->hash_rxqs_n); ++i) {
 			assert(!BITFIELD_ISSET
 			       ((*priv->hash_rxqs)[i].mac_configured,
@@ -463,7 +463,7 @@ end:
 }
 
 /**
- * Register all MAC addresses in all RX hash queues.
+ * Register all MAC addresses in all hash RX queues.
  *
  * @param priv
  *   Pointer to private structure.

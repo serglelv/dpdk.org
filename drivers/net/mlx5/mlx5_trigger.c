@@ -67,7 +67,7 @@ mlx5_dev_start(struct rte_eth_dev *dev)
 		priv_unlock(priv);
 		return 0;
 	}
-	DEBUG("%p: allocating and configuring RX hash queues", (void *)dev);
+	DEBUG("%p: allocating and configuring hash RX queues", (void *)dev);
 	err = priv_create_hash_rxqs(priv);
 	if (!err)
 		err = priv_mac_addrs_enable(priv);
@@ -78,7 +78,7 @@ mlx5_dev_start(struct rte_eth_dev *dev)
 	if (!err)
 		priv->started = 1;
 	else {
-		ERROR("%p: an error occured while configuring RX hash queues:"
+		ERROR("%p: an error occured while configuring hash RX queues:"
 		      " %s",
 		      (void *)priv, strerror(err));
 		/* Rollback. */
@@ -109,7 +109,7 @@ mlx5_dev_stop(struct rte_eth_dev *dev)
 		priv_unlock(priv);
 		return;
 	}
-	DEBUG("%p: cleaning up and destroying RX hash queues", (void *)dev);
+	DEBUG("%p: cleaning up and destroying hash RX queues", (void *)dev);
 	priv_allmulticast_disable(priv);
 	priv_promiscuous_disable(priv);
 	priv_mac_addrs_disable(priv);

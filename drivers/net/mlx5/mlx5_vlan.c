@@ -93,7 +93,7 @@ vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 	if ((on) && (!priv->vlan_filter[j].enabled)) {
 		/*
 		 * Filter is disabled, enable it.
-		 * Rehashing flows in all RX hash queues is necessary.
+		 * Rehashing flows in all hash RX queues is necessary.
 		 */
 		for (i = 0; (i != priv->hash_rxqs_n); ++i)
 			hash_rxq_mac_addrs_del(&(*priv->hash_rxqs)[i]);

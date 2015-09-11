@@ -230,7 +230,7 @@ const size_t rss_hash_default_key_len = sizeof(rss_hash_default_key);
  * @param flow_attr_size
  *   Entire size of flow_attr and trailing room for flow specifications.
  * @param type
- *   Requested Hash RX queue type.
+ *   Requested hash RX queue type.
  *
  * @return
  *   Total size of the flow attribute buffer. No errors are defined.
@@ -292,7 +292,7 @@ log2above(unsigned int v)
 }
 
 /**
- * Initialize RX hash queues and indirection table.
+ * Initialize hash RX queues and indirection table.
  *
  * @param priv
  *   Pointer to private structure.
@@ -358,7 +358,7 @@ priv_create_hash_rxqs(struct priv *priv)
 	     (ind_table_init[ind_tables_n] != NULL);
 	     ++ind_tables_n)
 		hash_rxqs_n += ind_table_init[ind_tables_n]->hash_types_n;
-	DEBUG("allocating %u RX hash queues for %u WQs, %u indirection tables",
+	DEBUG("allocating %u hash RX queues for %u WQs, %u indirection tables",
 	      hash_rxqs_n, priv->rxqs_n, ind_tables_n);
 	/* Create indirection tables. */
 	ind_tables = rte_calloc(__func__, ind_tables_n,
@@ -432,7 +432,7 @@ priv_create_hash_rxqs(struct priv *priv)
 			.port_num = priv->port,
 		};
 
-		DEBUG("using indirection table %u for RX hash queue %u",
+		DEBUG("using indirection table %u for hash RX queue %u",
 		      j, i);
 		*hash_rxq = (struct hash_rxq){
 			.priv = priv,
@@ -441,7 +441,7 @@ priv_create_hash_rxqs(struct priv *priv)
 		};
 		if (hash_rxq->qp == NULL) {
 			err = (errno ? errno : EINVAL);
-			ERROR("RX hash QP creation failure: %s",
+			ERROR("Hash RX QP creation failure: %s",
 			      strerror(err));
 			goto error;
 		}
@@ -484,7 +484,7 @@ error:
 }
 
 /**
- * Clean up RX hash queues and indirection table.
+ * Clean up hash RX queues and indirection table.
  *
  * @param priv
  *   Pointer to private structure.
@@ -494,7 +494,7 @@ priv_destroy_hash_rxqs(struct priv *priv)
 {
 	unsigned int i;
 
-	DEBUG("destroying %u RX hash queues", priv->hash_rxqs_n);
+	DEBUG("destroying %u hash RX queues", priv->hash_rxqs_n);
 	if (priv->hash_rxqs_n == 0) {
 		assert(priv->hash_rxqs == NULL);
 		assert(priv->ind_tables == NULL);

@@ -62,10 +62,10 @@ static void hash_rxq_promiscuous_disable(struct hash_rxq *);
 static void hash_rxq_allmulticast_disable(struct hash_rxq *);
 
 /**
- * Enable promiscuous mode in a RX hash queue.
+ * Enable promiscuous mode in a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
@@ -104,7 +104,7 @@ hash_rxq_promiscuous_enable(struct hash_rxq *hash_rxq)
 }
 
 /**
- * Enable promiscuous mode in all RX hash queues.
+ * Enable promiscuous mode in all hash RX queues.
  *
  * @param priv
  *   Private structure.
@@ -163,10 +163,10 @@ mlx5_promiscuous_enable(struct rte_eth_dev *dev)
 }
 
 /**
- * Disable promiscuous mode in a RX hash queue.
+ * Disable promiscuous mode in a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  */
 static void
 hash_rxq_promiscuous_disable(struct hash_rxq *hash_rxq)
@@ -182,7 +182,7 @@ hash_rxq_promiscuous_disable(struct hash_rxq *hash_rxq)
 }
 
 /**
- * Disable promiscuous mode in all RX hash queues.
+ * Disable promiscuous mode in all hash RX queues.
  *
  * @param priv
  *   Private structure.
@@ -223,10 +223,10 @@ mlx5_promiscuous_disable(struct rte_eth_dev *dev)
 }
 
 /**
- * Enable allmulti mode in a RX hash queue.
+ * Enable allmulti mode in a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  *
  * @return
  *   0 on success, errno value on failure.
@@ -262,7 +262,7 @@ hash_rxq_allmulticast_enable(struct hash_rxq *hash_rxq)
 }
 
 /**
- * Enable allmulti mode in all RX hash queues.
+ * Enable allmulti mode in all hash RX queues.
  *
  * @param priv
  *   Private structure.
@@ -316,10 +316,10 @@ mlx5_allmulticast_enable(struct rte_eth_dev *dev)
 }
 
 /**
- * Disable allmulti mode in a RX hash queue.
+ * Disable allmulti mode in a hash RX queue.
  *
  * @param hash_rxq
- *   Pointer to RX hash queue structure.
+ *   Pointer to hash RX queue structure.
  */
 static void
 hash_rxq_allmulticast_disable(struct hash_rxq *hash_rxq)
@@ -333,7 +333,7 @@ hash_rxq_allmulticast_disable(struct hash_rxq *hash_rxq)
 }
 
 /**
- * Disable allmulti mode in all RX hash queues.
+ * Disable allmulti mode in all hash RX queues.
  *
  * @param priv
  *   Private structure.
