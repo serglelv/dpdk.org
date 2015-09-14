@@ -61,6 +61,7 @@
 #include <rte_malloc.h>
 #include <rte_ethdev.h>
 #include <rte_pci.h>
+#include <rte_common.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -209,7 +210,7 @@ mlx5_dev_idx(struct rte_pci_addr *pci_addr)
 	int ret = -1;
 
 	assert(pci_addr != NULL);
-	for (i = 0; (i != elemof(mlx5_dev)); ++i) {
+	for (i = 0; (i != RTE_DIM(mlx5_dev)); ++i) {
 		if ((mlx5_dev[i].pci_addr.domain == pci_addr->domain) &&
 		    (mlx5_dev[i].pci_addr.bus == pci_addr->bus) &&
 		    (mlx5_dev[i].pci_addr.devid == pci_addr->devid) &&

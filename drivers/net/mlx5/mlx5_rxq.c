@@ -54,6 +54,7 @@
 #include <rte_mbuf.h>
 #include <rte_malloc.h>
 #include <rte_ethdev.h>
+#include <rte_common.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -156,7 +157,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 };
 
 /* Number of entries in hash_rxq_init[]. */
-const unsigned int hash_rxq_init_n = elemof(hash_rxq_init);
+const unsigned int hash_rxq_init_n = RTE_DIM(hash_rxq_init);
 
 /* Initialization data for hash RX queue indirection tables. */
 static const struct ind_table_init ind_table_init[] = {
@@ -244,7 +245,7 @@ priv_populate_flow_attr(const struct priv *priv,
 	size_t offset = sizeof(*flow_attr);
 	const struct hash_rxq_init *init = &hash_rxq_init[type];
 
-	assert((size_t)type < elemof(hash_rxq_init));
+	assert((size_t)type < RTE_DIM(hash_rxq_init));
 	do {
 		offset += init->flow_spec.hdr.size;
 		init = init->underlayer;
@@ -509,8 +510,8 @@ priv_destroy_hash_rxqs(struct priv *priv)
 		/* Also check that there are no remaining flows. */
 		assert(hash_rxq->allmulti_flow == NULL);
 		assert(hash_rxq->promisc_flow == NULL);
-		for (j = 0; (j != elemof(hash_rxq->mac_flow)); ++j)
-			for (k = 0; (k != elemof(hash_rxq->mac_flow[j])); ++k)
+		for (j = 0; (j != RTE_DIM(hash_rxq->mac_flow)); ++j)
+			for (k = 0; (k != RTE_DIM(hash_rxq->mac_flow[j])); ++k)
 				assert(hash_rxq->mac_flow[j][k] == NULL);
 		claim_zero(ibv_destroy_qp(hash_rxq->qp));
 	}
@@ -562,12 +563,12 @@ rxq_alloc_elts_sp(struct rxq *rxq, unsigned int elts_n,
 	for (i = 0; (i != elts_n); ++i) {
 		unsigned int j;
 		struct rxq_elt_sp *elt = &(*elts)[i];
-		struct ibv_sge (*sges)[(elemof(elt->sges))] = &elt->sges;
+		struct ibv_sge (*sges)[RTE_DIM(elt->sges)] = &elt->sges;
 
 		/* These two arrays must have the same size. */
-		assert(elemof(elt->sges) == elemof(elt->bufs));
+		assert(RTE_DIM(elt->sges) == RTE_DIM(elt->bufs));
 		/* For each SGE (segment). */
-		for (j = 0; (j != elemof(elt->bufs)); ++j) {
+		for (j = 0; (j != RTE_DIM(elt->bufs)); ++j) {
 			struct ibv_sge *sge = &(*sges)[j];
 			struct rte_mbuf *buf;
 
@@ -609,7 +610,7 @@ rxq_alloc_elts_sp(struct rxq *rxq, unsigned int elts_n,
 		}
 	}
 	DEBUG("%p: allocated and configured %u WRs (%zu segments)",
-	      (void *)rxq, elts_n, (elts_n * elemof((*elts)[0].sges)));
+	      (void *)rxq, elts_n, (elts_n * RTE_DIM((*elts)[0].sges)));
 	rxq->elts_n = elts_n;
 	rxq->elts_head = 0;
 	rxq->elts.sp = elts;
@@ -618,11 +619,11 @@ rxq_alloc_elts_sp(struct rxq *rxq, unsigned int elts_n,
 error:
 	if (elts != NULL) {
 		assert(pool == NULL);
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			unsigned int j;
 			struct rxq_elt_sp *elt = &(*elts)[i];
 
-			for (j = 0; (j != elemof(elt->bufs)); ++j) {
+			for (j = 0; (j != RTE_DIM(elt->bufs)); ++j) {
 				struct rte_mbuf *buf = elt->bufs[j];
 
 				if (buf != NULL)
@@ -654,11 +655,11 @@ rxq_free_elts_sp(struct rxq *rxq)
 	rxq->elts.sp = NULL;
 	if (elts == NULL)
 		return;
-	for (i = 0; (i != elemof(*elts)); ++i) {
+	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 		unsigned int j;
 		struct rxq_elt_sp *elt = &(*elts)[i];
 
-		for (j = 0; (j != elemof(elt->bufs)); ++j) {
+		for (j = 0; (j != RTE_DIM(elt->bufs)); ++j) {
 			struct rte_mbuf *buf = elt->bufs[j];
 
 			if (buf != NULL)
@@ -740,7 +741,7 @@ rxq_alloc_elts(struct rxq *rxq, unsigned int elts_n, struct rte_mbuf **pool)
 error:
 	if (elts != NULL) {
 		assert(pool == NULL);
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			struct rxq_elt *elt = &(*elts)[i];
 			struct rte_mbuf *buf = elt->buf;
 
@@ -772,7 +773,7 @@ rxq_free_elts(struct rxq *rxq)
 	rxq->elts.no_sp = NULL;
 	if (elts == NULL)
 		return;
-	for (i = 0; (i != elemof(*elts)); ++i) {
+	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 		struct rxq_elt *elt = &(*elts)[i];
 		struct rte_mbuf *buf = elt->buf;
 
@@ -920,11 +921,11 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	if (rxq->sp) {
 		struct rxq_elt_sp (*elts)[rxq->elts_n] = rxq->elts.sp;
 
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			struct rxq_elt_sp *elt = &(*elts)[i];
 			unsigned int j;
 
-			for (j = 0; (j != elemof(elt->bufs)); ++j) {
+			for (j = 0; (j != RTE_DIM(elt->bufs)); ++j) {
 				assert(elt->bufs[j] != NULL);
 				pool[k++] = elt->bufs[j];
 			}
@@ -932,7 +933,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	} else {
 		struct rxq_elt (*elts)[rxq->elts_n] = rxq->elts.no_sp;
 
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			struct rxq_elt *elt = &(*elts)[i];
 			struct rte_mbuf *buf = elt->buf;
 
@@ -975,18 +976,18 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	if (tmpl.sp) {
 		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
 
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			err = tmpl.if_wq->recv_sg_list
 				(tmpl.wq,
 				 (*elts)[i].sges,
-				 elemof((*elts)[i].sges));
+				 RTE_DIM((*elts)[i].sges));
 			if (err)
 				break;
 		}
 	} else {
 		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
 
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			err = tmpl.if_wq->recv_burst(
 				tmpl.wq,
 				&(*elts)[i].sge,
@@ -1196,18 +1197,18 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	if (tmpl.sp) {
 		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
 
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			ret = tmpl.if_wq->recv_sg_list
 				(tmpl.wq,
 				 (*elts)[i].sges,
-				 elemof((*elts)[i].sges));
+				 RTE_DIM((*elts)[i].sges));
 			if (ret)
 				break;
 		}
 	} else {
 		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
 
-		for (i = 0; (i != elemof(*elts)); ++i) {
+		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			ret = tmpl.if_wq->recv_burst(
 				tmpl.wq,
 				&(*elts)[i].sge,

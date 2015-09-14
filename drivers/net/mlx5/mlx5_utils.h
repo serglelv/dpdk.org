@@ -58,20 +58,6 @@
 	 !!(((bf)[((b) / (sizeof((bf)[0]) * CHAR_BIT))] &		\
 	     ((size_t)1 << ((b) % (sizeof((bf)[0]) * CHAR_BIT))))))
 
-/* Number of elements in array. */
-#define elemof(a) (sizeof(a) / sizeof((a)[0]))
-
-/* Cast pointer p to structure member m to its parent structure of type t. */
-#define containerof(p, t, m) ((t *)((uint8_t *)(p) - offsetof(t, m)))
-
-/* Branch prediction helpers. */
-#ifndef likely
-#define likely(c) __builtin_expect(!!(c), 1)
-#endif
-#ifndef unlikely
-#define unlikely(c) __builtin_expect(!!(c), 0)
-#endif
-
 /* Debugging */
 #ifndef NDEBUG
 #include <stdio.h>
@@ -91,14 +77,10 @@
 	})[0])
 #define DEBUG(...) DEBUG_(__VA_ARGS__, '\n')
 #define claim_zero(...) assert((__VA_ARGS__) == 0)
-#define claim_nonzero(...) assert((__VA_ARGS__) != 0)
-#define claim_positive(...) assert((__VA_ARGS__) >= 0)
 #else /* NDEBUG */
 /* No-ops. */
 #define DEBUG(...) (void)0
 #define claim_zero(...) (__VA_ARGS__)
-#define claim_nonzero(...) (__VA_ARGS__)
-#define claim_positive(...) (__VA_ARGS__)
 #endif /* NDEBUG */
 
 /* Runtime logging through RTE_LOG() is enabled when not in debugging mode.

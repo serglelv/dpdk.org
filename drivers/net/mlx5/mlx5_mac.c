@@ -58,6 +58,7 @@
 #endif
 #include <rte_ether.h>
 #include <rte_ethdev.h>
+#include <rte_common.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -135,10 +136,10 @@ hash_rxq_mac_addr_del(struct hash_rxq *hash_rxq, unsigned int mac_index)
 	unsigned int i;
 	unsigned int vlans = 0;
 
-	assert(mac_index < elemof(priv->mac));
+	assert(mac_index < RTE_DIM(priv->mac));
 	if (!BITFIELD_ISSET(hash_rxq->mac_configured, mac_index))
 		return;
-	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
+	for (i = 0; (i != RTE_DIM(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled)
 			continue;
 		hash_rxq_del_flow(hash_rxq, mac_index, i);
@@ -162,7 +163,7 @@ hash_rxq_mac_addrs_del(struct hash_rxq *hash_rxq)
 	struct priv *priv = hash_rxq->priv;
 	unsigned int i;
 
-	for (i = 0; (i != elemof(priv->mac)); ++i)
+	for (i = 0; (i != RTE_DIM(priv->mac)); ++i)
 		hash_rxq_mac_addr_del(hash_rxq, i);
 }
 
@@ -181,7 +182,7 @@ priv_mac_addr_del(struct priv *priv, unsigned int mac_index)
 {
 	unsigned int i;
 
-	assert(mac_index < elemof(priv->mac));
+	assert(mac_index < RTE_DIM(priv->mac));
 	if (!BITFIELD_ISSET(priv->mac_configured, mac_index))
 		return;
 	for (i = 0; (i != priv->hash_rxqs_n); ++i)
@@ -258,8 +259,8 @@ hash_rxq_add_flow(struct hash_rxq *hash_rxq, unsigned int mac_index,
 	struct ibv_exp_flow_attr *attr = &data->attr;
 	struct ibv_exp_flow_spec_eth *spec = &data->spec;
 
-	assert(mac_index < elemof(priv->mac));
-	assert((vlan_index < elemof(priv->vlan_filter)) || (vlan_index == -1u));
+	assert(mac_index < RTE_DIM(priv->mac));
+	assert((vlan_index < RTE_DIM(priv->vlan_filter)) || (vlan_index == -1u));
 	/*
 	 * No padding must be inserted by the compiler between attr and spec.
 	 * This layout is expected by libibverbs.
@@ -331,11 +332,11 @@ hash_rxq_mac_addr_add(struct hash_rxq *hash_rxq, unsigned int mac_index)
 	unsigned int vlans = 0;
 	int ret;
 
-	assert(mac_index < elemof(priv->mac));
+	assert(mac_index < RTE_DIM(priv->mac));
 	if (BITFIELD_ISSET(hash_rxq->mac_configured, mac_index))
 		hash_rxq_mac_addr_del(hash_rxq, mac_index);
 	/* Fill VLAN specifications. */
-	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
+	for (i = 0; (i != RTE_DIM(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled)
 			continue;
 		/* Create related flow. */
@@ -377,7 +378,7 @@ hash_rxq_mac_addrs_add(struct hash_rxq *hash_rxq)
 	unsigned int i;
 	int ret;
 
-	for (i = 0; (i != elemof(priv->mac)); ++i) {
+	for (i = 0; (i != RTE_DIM(priv->mac)); ++i) {
 		if (!BITFIELD_ISSET(priv->mac_configured, i))
 			continue;
 		ret = hash_rxq_mac_addr_add(hash_rxq, i);
@@ -414,9 +415,9 @@ priv_mac_addr_add(struct priv *priv, unsigned int mac_index,
 	unsigned int i;
 	int ret;
 
-	assert(mac_index < elemof(priv->mac));
+	assert(mac_index < RTE_DIM(priv->mac));
 	/* First, make sure this address isn't already configured. */
-	for (i = 0; (i != elemof(priv->mac)); ++i) {
+	for (i = 0; (i != RTE_DIM(priv->mac)); ++i) {
 		/* Skip this index, it's going to be reconfigured. */
 		if (i == mac_index)
 			continue;

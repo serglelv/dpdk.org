@@ -53,6 +53,8 @@
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 #include <rte_prefetch.h>
+#include <rte_common.h>
+#include <rte_branch_prediction.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -131,7 +133,7 @@ txq_mp2mr(struct txq *txq, struct rte_mempool *mp)
 	unsigned int i;
 	struct ibv_mr *mr;
 
-	for (i = 0; (i != elemof(txq->mp2mr)); ++i) {
+	for (i = 0; (i != RTE_DIM(txq->mp2mr)); ++i) {
 		if (unlikely(txq->mp2mr[i].mp == NULL)) {
 			/* Unknown MP, add a new MR for it. */
 			break;
@@ -153,7 +155,7 @@ txq_mp2mr(struct txq *txq, struct rte_mempool *mp)
 		      (void *)txq);
 		return (uint32_t)-1;
 	}
-	if (unlikely(i == elemof(txq->mp2mr))) {
+	if (unlikely(i == RTE_DIM(txq->mp2mr))) {
 		/* Table is full, remove oldest entry. */
 		DEBUG("%p: MR <-> MP table full, dropping oldest entry.",
 		      (void *)txq);
@@ -240,8 +242,8 @@ tx_burst_sg(struct txq *txq, unsigned int segs, struct txq_elt *elt,
 
 	/* When there are too many segments, extra segments are
 	 * linearized in the last SGE. */
-	if (unlikely(segs > elemof(*sges))) {
-		segs = (elemof(*sges) - 1);
+	if (unlikely(segs > RTE_DIM(*sges))) {
+		segs = (RTE_DIM(*sges) - 1);
 		linearize = 1;
 	}
 	/* Update element. */
@@ -281,7 +283,7 @@ tx_burst_sg(struct txq *txq, unsigned int segs, struct txq_elt *elt,
 		linear_t *linear = &(*txq->elts_linear)[elts_head];
 		unsigned int size = linearize_mbuf(linear, buf);
 
-		assert(segs == (elemof(*sges) - 1));
+		assert(segs == (RTE_DIM(*sges) - 1));
 		if (size == 0) {
 			/* Invalid packet. */
 			DEBUG("%p: packet too large to be linearized.",
@@ -291,7 +293,7 @@ tx_burst_sg(struct txq *txq, unsigned int segs, struct txq_elt *elt,
 			goto stop;
 		}
 		/* If MLX5_PMD_SGE_WR_N is 1, free mbuf immediately. */
-		if (elemof(*sges) == 1) {
+		if (RTE_DIM(*sges) == 1) {
 			do {
 				struct rte_mbuf *next = NEXT(buf);
 
@@ -773,7 +775,7 @@ mlx5_rx_burst_sp(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 repost:
 		ret = rxq->if_wq->recv_sg_list(rxq->wq,
 					       elt->sges,
-					       elemof(elt->sges));
+					       RTE_DIM(elt->sges));
 		if (unlikely(ret)) {
 			/* Inability to repost WRs is fatal. */
 			DEBUG("%p: recv_sg_list(): failed (ret=%d)",

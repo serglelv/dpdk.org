@@ -159,7 +159,7 @@ txq_free_elts(struct txq *txq)
 	rte_free(elts_linear);
 	if (elts == NULL)
 		return;
-	for (i = 0; (i != elemof(*elts)); ++i) {
+	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 		struct txq_elt *elt = &(*elts)[i];
 
 		if (elt->buf == NULL)
@@ -222,7 +222,7 @@ txq_cleanup(struct txq *txq)
 						      txq->rd,
 						      &attr));
 	}
-	for (i = 0; (i != elemof(txq->mp2mr)); ++i) {
+	for (i = 0; (i != RTE_DIM(txq->mp2mr)); ++i) {
 		if (txq->mp2mr[i].mp == NULL)
 			break;
 		assert(txq->mp2mr[i].mr != NULL);

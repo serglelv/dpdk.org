@@ -41,6 +41,7 @@
 #pragma GCC diagnostic ignored "-pedantic"
 #endif
 #include <rte_ethdev.h>
+#include <rte_common.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -70,7 +71,7 @@ vlan_filter_set(struct rte_eth_dev *dev, uint16_t vlan_id, int on)
 
 	DEBUG("%p: %s VLAN filter ID %" PRIu16,
 	      (void *)dev, (on ? "enable" : "disable"), vlan_id);
-	for (i = 0; (i != elemof(priv->vlan_filter)); ++i) {
+	for (i = 0; (i != RTE_DIM(priv->vlan_filter)); ++i) {
 		if (!priv->vlan_filter[i].enabled) {
 			/* Unused index, remember it. */
 			j = i;
