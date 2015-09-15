@@ -61,44 +61,84 @@
 	 !!(((bf)[((b) / (sizeof((bf)[0]) * CHAR_BIT))] &		\
 	     ((size_t)1 << ((b) % (sizeof((bf)[0]) * CHAR_BIT))))))
 
-/* Debugging */
-#ifndef NDEBUG
-#define DEBUG__(m, ...)						\
-	(fprintf(stderr, "%s:%d: %s(): " m "%c",		\
-		 __FILE__, __LINE__, __func__, __VA_ARGS__),	\
-	 fflush(stderr),					\
-	 (void)0)
+/* Save and restore errno around argument evaluation. */
+#define ERRNO_SAFE(x) ((errno = (int []){ errno, ((x), 0) }[0]))
+
 /*
- * Save/restore errno around DEBUG__().
- * XXX somewhat undefined behavior, but works.
+ * Helper macros to work around __VA_ARGS__ limitations in a C99 compliant
+ * manner.
  */
-#define DEBUG_(...)				\
-	(errno = ((int []){			\
-		*(volatile int *)&errno,	\
-		(DEBUG__(__VA_ARGS__), 0)	\
-	})[0])
-#define DEBUG(...) DEBUG_(__VA_ARGS__, '\n')
-#define claim_zero(...) assert((__VA_ARGS__) == 0)
+#define PMD_DRV_LOG_STRIP(a, b) a
+#define PMD_DRV_LOG_OPAREN (
+#define PMD_DRV_LOG_CPAREN )
+#define PMD_DRV_LOG_COMMA ,
+
+/* Return the file name part of a path. */
+static inline const char *
+pmd_drv_log_basename(const char *s)
+{
+	const char *n = s;
+
+	while (*n)
+		if (*(n++) == '/')
+			s = n;
+	return s;
+}
+
+/*
+ * When debugging is enabled (NDEBUG not defined), file, line and function
+ * informations replace the driver name (MLX5_DRIVER_NAME) in log messages.
+ */
+#ifndef NDEBUG
+
+#define PMD_DRV_LOG___(level, ...) \
+	ERRNO_SAFE(RTE_LOG(level, PMD, __VA_ARGS__))
+#define PMD_DRV_LOG__(level, ...) \
+	PMD_DRV_LOG___(level, "%s:%u: %s(): " __VA_ARGS__)
+#define PMD_DRV_LOG_(level, s, ...) \
+	PMD_DRV_LOG__(level, \
+		s "\n" PMD_DRV_LOG_COMMA \
+		pmd_drv_log_basename(__FILE__) PMD_DRV_LOG_COMMA \
+		__LINE__ PMD_DRV_LOG_COMMA \
+		__func__, \
+		__VA_ARGS__)
+
 #else /* NDEBUG */
-/* No-ops. */
-#define DEBUG(...) (void)0
-#define claim_zero(...) (__VA_ARGS__)
+
+#define PMD_DRV_LOG___(level, ...) \
+	ERRNO_SAFE(RTE_LOG(level, PMD, MLX5_DRIVER_NAME ": " __VA_ARGS__))
+#define PMD_DRV_LOG__(level, ...) \
+	PMD_DRV_LOG___(level, __VA_ARGS__)
+#define PMD_DRV_LOG_(level, s, ...) \
+	PMD_DRV_LOG__(level, s "\n", __VA_ARGS__)
+
 #endif /* NDEBUG */
 
-/* Runtime logging through RTE_LOG() is enabled when not in debugging mode.
- * Intermediate LOG_*() macros add the required end-of-line characters. */
+/* Generic printf()-like logging macro with automatic line feed. */
+#define PMD_DRV_LOG(level, ...) \
+	PMD_DRV_LOG_(level, \
+		__VA_ARGS__ PMD_DRV_LOG_STRIP PMD_DRV_LOG_OPAREN, \
+		PMD_DRV_LOG_CPAREN)
+
+/*
+ * Like assert(), DEBUG() becomes a no-op and claim_zero() does not perform
+ * any check when debugging is disabled.
+ */
 #ifndef NDEBUG
-#define INFO(...) DEBUG(__VA_ARGS__)
-#define WARN(...) DEBUG(__VA_ARGS__)
-#define ERROR(...) DEBUG(__VA_ARGS__)
-#else
-#define LOG__(level, m, ...) \
-	RTE_LOG(level, PMD, MLX5_DRIVER_NAME ": " m "%c", __VA_ARGS__)
-#define LOG_(level, ...) LOG__(level, __VA_ARGS__, '\n')
-#define INFO(...) LOG_(INFO, __VA_ARGS__)
-#define WARN(...) LOG_(WARNING, __VA_ARGS__)
-#define ERROR(...) LOG_(ERR, __VA_ARGS__)
-#endif
+
+#define DEBUG(...) PMD_DRV_LOG(DEBUG, __VA_ARGS__)
+#define claim_zero(...) assert((__VA_ARGS__) == 0)
+
+#else /* NDEBUG */
+
+#define DEBUG(...) (void)0
+#define claim_zero(...) (__VA_ARGS__)
+
+#endif /* NDEBUG */
+
+#define INFO(...) PMD_DRV_LOG(INFO, __VA_ARGS__)
+#define WARN(...) PMD_DRV_LOG(WARNING, __VA_ARGS__)
+#define ERROR(...) PMD_DRV_LOG(ERR, __VA_ARGS__)
 
 /* Convenience macros for accessing mbuf fields. */
 #define NEXT(m) ((m)->next)
