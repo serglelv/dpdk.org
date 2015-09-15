@@ -79,8 +79,6 @@ enum {
 	PCI_DEVICE_ID_MELLANOX_CONNECTX4LXVF = 0x1016,
 };
 
-#define MLX5_DRIVER_NAME "librte_pmd_mlx5"
-
 struct priv {
 	struct rte_eth_dev *dev; /* Ethernet device. */
 	struct ibv_context *ctx; /* Verbs context. */

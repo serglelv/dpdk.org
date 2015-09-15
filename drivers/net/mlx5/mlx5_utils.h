@@ -35,9 +35,12 @@
 #define RTE_PMD_MLX5_UTILS_H_
 
 #include <stddef.h>
+#include <stdio.h>
 #include <limits.h>
 #include <assert.h>
 #include <errno.h>
+
+#include "mlx5_defs.h"
 
 /* Bit-field manipulation. */
 #define BITFIELD_DECLARE(bf, type, size)				\
@@ -60,7 +63,6 @@
 
 /* Debugging */
 #ifndef NDEBUG
-#include <stdio.h>
 #define DEBUG__(m, ...)						\
 	(fprintf(stderr, "%s:%d: %s(): " m "%c",		\
 		 __FILE__, __LINE__, __func__, __VA_ARGS__),	\

@@ -34,6 +34,9 @@
 #ifndef RTE_PMD_MLX5_DEFS_H_
 #define RTE_PMD_MLX5_DEFS_H_
 
+/* Reported driver name. */
+#define MLX5_DRIVER_NAME "librte_pmd_mlx5"
+
 /*
  * Maximum number of simultaneous MAC addresses supported.
  *
