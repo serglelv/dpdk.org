@@ -410,7 +410,6 @@ dev_configure(struct rte_eth_dev *dev)
 	struct priv *priv = dev->data->dev_private;
 	unsigned int rxqs_n = dev->data->nb_rx_queues;
 	unsigned int txqs_n = dev->data->nb_tx_queues;
-	unsigned int i;
 
 	priv->rxqs = (void *)dev->data->rx_queues;
 	priv->txqs = (void *)dev->data->tx_queues;
@@ -423,10 +422,6 @@ dev_configure(struct rte_eth_dev *dev)
 		return 0;
 	INFO("%p: RX queues number update: %u -> %u",
 	     (void *)dev, priv->rxqs_n, rxqs_n);
-	/* Fail if at least one RX queue is still allocated. */
-	for (i = 0; (i != priv->rxqs_n); ++i)
-		if ((*priv->rxqs)[i] != NULL)
-			return EINVAL;
 	priv->rxqs_n = rxqs_n;
 	return 0;
 }
