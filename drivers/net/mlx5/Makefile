@@ -31,6 +31,12 @@
 
 include $(RTE_SDK)/mk/rte.vars.mk
 
+ifeq ($(CONFIG_RTE_BUILD_COMBINE_LIBS)$(CONFIG_RTE_BUILD_SHARED_LIB),yy)
+all:
+	@echo 'MLX5: Not supported in a combined shared library'
+	@false
+endif
+
 # Library name.
 LIB = librte_pmd_mlx5.a
 
@@ -60,6 +66,7 @@ CFLAGS += -g
 CFLAGS += -I.
 CFLAGS += -D_XOPEN_SOURCE=600
 CFLAGS += $(WERROR_FLAGS)
+LDLIBS += -libverbs
 
 # A few warnings cannot be avoided in external headers.
 CFLAGS += -Wno-error=cast-qual
