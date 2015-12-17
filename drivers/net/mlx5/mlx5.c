@@ -174,7 +174,9 @@ static const struct eth_dev_ops mlx5_dev_ops = {
 	.reta_query = mlx5_dev_rss_reta_query,
 	.rss_hash_update = mlx5_rss_hash_update,
 	.rss_hash_conf_get = mlx5_rss_hash_conf_get,
+#ifdef MLX5_FDIR_SUPPORT
 	.filter_ctrl = mlx5_dev_filter_ctrl,
+#endif /* MLX5_FDIR_SUPPORT */
 };
 
 static struct {

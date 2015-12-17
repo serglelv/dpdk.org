@@ -62,6 +62,7 @@
 #include "mlx5.h"
 #include "mlx5_rxtx.h"
 #include "mlx5_utils.h"
+#include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
 
 /* Initialization data for hash RX queues. */
@@ -72,7 +73,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_SRC_PORT_TCP |
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_TCP,
-		.flow_priority = 3,
+		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_EXP_FLOW_SPEC_TCP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
@@ -85,7 +86,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_SRC_PORT_UDP |
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV4_UDP,
-		.flow_priority = 3,
+		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_EXP_FLOW_SPEC_UDP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
@@ -97,7 +98,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV4),
 		.dpdk_rss_hf = (ETH_RSS_IPV4 |
 				ETH_RSS_FRAG_IPV4),
-		.flow_priority = 4,
+		.flow_priority = 1,
 		.flow_spec.ipv4 = {
 			.type = IBV_EXP_FLOW_SPEC_IPV4,
 			.size = sizeof(hash_rxq_init[0].flow_spec.ipv4),
@@ -111,7 +112,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_SRC_PORT_TCP |
 				IBV_EXP_RX_HASH_DST_PORT_TCP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_TCP,
-		.flow_priority = 3,
+		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_EXP_FLOW_SPEC_TCP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
@@ -124,7 +125,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_SRC_PORT_UDP |
 				IBV_EXP_RX_HASH_DST_PORT_UDP),
 		.dpdk_rss_hf = ETH_RSS_NONFRAG_IPV6_UDP,
-		.flow_priority = 3,
+		.flow_priority = 0,
 		.flow_spec.tcp_udp = {
 			.type = IBV_EXP_FLOW_SPEC_UDP,
 			.size = sizeof(hash_rxq_init[0].flow_spec.tcp_udp),
@@ -136,7 +137,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 				IBV_EXP_RX_HASH_DST_IPV6),
 		.dpdk_rss_hf = (ETH_RSS_IPV6 |
 				ETH_RSS_FRAG_IPV6),
-		.flow_priority = 4,
+		.flow_priority = 1,
 		.flow_spec.ipv6 = {
 			.type = IBV_EXP_FLOW_SPEC_IPV6,
 			.size = sizeof(hash_rxq_init[0].flow_spec.ipv6),
@@ -147,7 +148,7 @@ const struct hash_rxq_init hash_rxq_init[] = {
 	[HASH_RXQ_ETH] = {
 		.hash_fields = 0,
 		.dpdk_rss_hf = 0,
-		.flow_priority = 5,
+		.flow_priority = 2,
 		.flow_spec.eth = {
 			.type = IBV_EXP_FLOW_SPEC_ETH,
 			.size = sizeof(hash_rxq_init[0].flow_spec.eth),
@@ -242,7 +243,12 @@ priv_flow_attr(struct priv *priv, struct ibv_exp_flow_attr *flow_attr,
 	init = &hash_rxq_init[type];
 	*flow_attr = (struct ibv_exp_flow_attr){
 		.type = IBV_EXP_FLOW_ATTR_NORMAL,
+#ifdef MLX5_FDIR_SUPPORT
+		/* Priorities < 3 are reserved for flow director. */
+		.priority = init->flow_priority + 3,
+#else /* MLX5_FDIR_SUPPORT */
 		.priority = init->flow_priority,
+#endif /* MLX5_FDIR_SUPPORT */
 		.num_of_specs = 0,
 		.port = priv->port,
 		.flags = 0,
