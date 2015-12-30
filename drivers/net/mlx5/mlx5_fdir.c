@@ -192,7 +192,9 @@ priv_fdir_flow_add(struct priv *priv,
 	uintptr_t spec_offset = (uintptr_t)&data->spec;
 	struct ibv_exp_flow_spec_eth *spec_eth;
 	struct ibv_exp_flow_spec_ipv4 *spec_ipv4;
+#ifdef HAVE_FLOW_SPEC_IPV6
 	struct ibv_exp_flow_spec_ipv6 *spec_ipv6;
+#endif /* HAVE_FLOW_SPEC_IPV6 */
 	struct ibv_exp_flow_spec_tcp_udp *spec_tcp_udp;
 	unsigned int i;
 
