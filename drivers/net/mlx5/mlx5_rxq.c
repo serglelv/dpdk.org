@@ -594,6 +594,9 @@ priv_allow_flow_type(struct priv *priv, enum hash_rxq_flow_type type)
 		return !priv->allmulti_req;
 	case HASH_RXQ_FLOW_TYPE_MAC:
 		return 1;
+	default:
+		/* Unsupported flow type is not allowed. */
+		return 0;
 	}
 	return 0;
 }
