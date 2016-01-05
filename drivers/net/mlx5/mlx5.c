@@ -187,6 +187,7 @@ static const struct eth_dev_ops mlx5_dev_ops = {
 	.flow_ctrl_set = mlx5_dev_set_flow_ctrl,
 	.mac_addr_remove = mlx5_mac_addr_remove,
 	.mac_addr_add = mlx5_mac_addr_add,
+	.mac_addr_set = mlx5_mac_addr_set,
 	.mtu_set = mlx5_dev_set_mtu,
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
 	.vlan_strip_queue_set = mlx5_vlan_strip_queue_set,
