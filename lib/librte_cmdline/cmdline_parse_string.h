@@ -66,7 +66,7 @@ extern "C" {
 #endif
 
 /* size of a parsed string */
-#define STR_TOKEN_SIZE 8192
+#define STR_TOKEN_SIZE 128
 
 typedef char cmdline_fixed_string_t[STR_TOKEN_SIZE];
 
