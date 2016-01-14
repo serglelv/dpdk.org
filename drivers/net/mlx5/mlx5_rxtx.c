@@ -1198,6 +1198,165 @@ repost:
 	return pkts_ret;
 }
 
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+
+/**
+ * DPDK callback for RX in multi-packet (MP) receive queue (RQ) mode.
+ *
+ * In MP RQ mode, returned mbufs are always indirect, their data pointers
+ * refer to a private memory pool. This mode does not implement scattered
+ * packets support as it is not necessary, packets are always entire.
+ *
+ * @param dpdk_rxq
+ *   Generic pointer to RX queue structure.
+ * @param[out] pkts
+ *   Array to store received packets.
+ * @param pkts_n
+ *   Maximum number of packets in array.
+ *
+ * @return
+ *   Number of packets successfully received (<= pkts_n).
+ */
+uint16_t
+mlx5_rx_burst_mp_rq(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
+{
+	struct rxq *rxq = (struct rxq *)dpdk_rxq;
+	const unsigned int chunks_n = rxq->chunks_n;
+	struct rxq_chunk (*const chunks)[chunks_n] = rxq->chunks;
+	unsigned int spent_n = rxq->chunks_spent_n;
+	unsigned int last = rxq->chunks_last;
+	unsigned int curr = rxq->chunks_curr;;
+	unsigned int i;
+	unsigned int pkts_ret = 0;
+	int ret;
+
+	/* MP RQ mode is mandatory. */
+	assert(rxq->mp_rq);
+	assert(last != RXQ_CHUNK_END);
+	assert(chunks_n > spent_n);
+	assert(chunks_n - spent_n != 0);
+	/* Collect garbage and repost chunks when threshold has been hit. */
+	if (unlikely(chunks_n - spent_n <= MLX5_PMD_MP_THRESH)) {
+		struct ibv_sge sges[spent_n];
+		unsigned int proc = last;
+
+		rxq_chunks_gc(rxq);
+		spent_n = rxq->chunks_spent_n;
+		last = rxq->chunks_last;
+		curr = rxq->chunks_curr;
+		/* Stop here if queue is still empty. */
+		if (unlikely(curr == last)) {
+			/* FIXME: process chunk and post it back. */
+			assert(proc == last);
+			assert(spent_n == chunks_n - 1);
+			return 0;
+		}
+		proc = (*chunks)[proc].next;
+		for (i = 0; proc != RXQ_CHUNK_END; ++i) {
+			struct rxq_chunk *chunk = &(*chunks)[proc];
+
+			sges[i] = chunk->sge;
+			proc = chunk->next;
+		}
+		if (i) {
+			ret = rxq->recv(rxq->wq, sges, i);
+			if (unlikely(ret)) {
+				/* Inability to repost WRs is fatal. */
+				WARN("%p: could not repost %u MP RQ chunks"
+				     " (%d)", (void *)rxq, i, ret);
+				abort();
+			}
+		}
+	}
+	for (i = 0; i != pkts_n; ++i) {
+		struct rxq_chunk *chunk = &(*chunks)[curr];
+		unsigned int len;
+		struct rte_mbuf *seg = __rte_mbuf_raw_alloc(rxq->mp);
+		uint32_t flags;
+		uint16_t vlan_tci;
+		uint32_t offset;
+
+		if (seg == NULL) {
+			/* Increment out of memory counters. */
+			++rxq->stats.rx_nombuf;
+			++rxq->priv->dev->data->rx_mbuf_alloc_failed;
+			break;
+		}
+		ret = rxq->poll(rxq->cq, &offset, &flags, &vlan_tci);
+		if (unlikely(ret < 0)) {
+			DEBUG("rxq=%p, poll_length() failed (ret=%d)",
+			      (void *)rxq, ret);
+			/* Errors cannot be recovered from. */
+			break;
+		}
+		if (ret == 0)
+			break;
+		assert(ret >= (rxq->crc_present << 2));
+		len = ret - (rxq->crc_present << 2);
+		seg->buf_addr = (void *)&chunk->storage[offset];
+		assert(chunk->mp);
+		seg->buf_physaddr = chunk->mp->phys_addr + offset;
+		seg->buf_len = len;
+		seg->data_off = 0;
+		rte_mbuf_refcnt_update(seg, 1);
+		assert(rte_mbuf_refcnt_read(seg) == 2);
+		seg->nb_segs = 1;
+		seg->port = rxq->port_id;
+		seg->pkt_len = len;
+		seg->data_len = len;
+		seg->pool = chunk->mp;
+		seg->next = NULL;
+		if (rxq->csum | rxq->csum_l2tun | rxq->vlan_strip) {
+			seg->packet_type = rxq_cq_to_pkt_type(flags);
+			seg->ol_flags = rxq_cq_to_ol_flags(rxq, flags);
+#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
+			if (flags & IBV_EXP_CQ_RX_CVLAN_STRIPPED_V1) {
+				seg->ol_flags |= PKT_RX_VLAN_PKT;
+				seg->vlan_tci = vlan_tci;
+			}
+#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
+		}
+		/* Keep reference to mbuf in chunk. */
+		chunk->bufs[chunk->bufs_n++] = seg;
+		assert(chunk->bufs_n <= RTE_DIM(chunk->bufs));
+		/* Return packet. */
+		*(pkts++) = seg;
+		++pkts_ret;
+#ifdef MLX5_PMD_SOFT_COUNTERS
+		/* Increment bytes counter. */
+		rxq->stats.ibytes += len;
+#endif
+		/* Switch to next chunk if this is the last packet. */
+		if (flags & IBV_EXP_CQ_RX_MULTI_PACKET_LAST_V1) {
+			curr = chunk->next;
+			++spent_n;
+			if (curr == last)
+				break;
+		}
+	}
+	if (unlikely(i == 0))
+		return 0;
+	rxq->chunks_curr = curr;
+	rxq->chunks_spent_n = spent_n;
+#ifdef MLX5_PMD_SOFT_COUNTERS
+	/* Increment packets counter. */
+	rxq->stats.ipackets += pkts_ret;
+#endif
+	return pkts_ret;
+}
+
+#else /* HAVE_VERBS_MULTI_PACKET_RQ */
+
+uint16_t
+mlx5_rx_burst_mp_rq(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
+{
+	/* This function should not be called. */
+	assert(0);
+	return removed_rx_burst(dpdk_rxq, pkts, pkts_n);
+}
+
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
+
 /**
  * Dummy DPDK callback for TX.
  *

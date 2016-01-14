@@ -362,6 +362,9 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 #ifdef HAVE_VERBS_RX_END_PADDING
 			IBV_EXP_DEVICE_ATTR_RX_PAD_END_ALIGN |
 #endif /* HAVE_VERBS_RX_END_PADDING */
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+			IBV_EXP_DEVICE_ATTR_MP_RQ |
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
 			0;
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
@@ -459,6 +462,48 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 #endif /* HAVE_VERBS_RX_END_PADDING */
 		DEBUG("hardware RX end alignment padding is %ssupported",
 		      (priv->hw_padding ? "" : "not "));
+
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+		priv->hw_mp_rq = !!(exp_device_attr.mp_rq_caps.supported_qps &
+				    IBV_EXP_QPT_RAW_PACKET);
+		if (!priv->hw_mp_rq)
+			DEBUG("multi-packet receive queues are not supported");
+		else {
+			unsigned int strides_min =
+				(1 << exp_device_attr.mp_rq_caps.
+				 min_single_wqe_log_num_of_strides);
+			unsigned int strides_max =
+				(1 << exp_device_attr.mp_rq_caps.
+				 max_single_wqe_log_num_of_strides);
+			unsigned int bytes_min =
+				(1 << exp_device_attr.mp_rq_caps.
+				 min_single_stride_log_num_of_bytes);
+			unsigned int bytes_max =
+				(1 << exp_device_attr.mp_rq_caps.
+				 max_single_stride_log_num_of_bytes);
+
+			DEBUG("multi-packet receive queues are supported with"
+			      " %u to %u strides per WQE and"
+			      " %u to %u bytes per stride",
+			      strides_min,
+			      strides_max,
+			      bytes_min,
+			      bytes_max);
+			if (!rte_is_power_of_2(MLX5_PMD_MP_STRIDES) ||
+			    !rte_is_power_of_2(MLX5_PMD_MP_BYTES) ||
+			    strides_min > MLX5_PMD_MP_STRIDES ||
+			    strides_max < MLX5_PMD_MP_STRIDES ||
+			    bytes_min > MLX5_PMD_MP_BYTES ||
+			    bytes_max < MLX5_PMD_MP_BYTES)
+				priv->hw_mp_rq = 0;
+			DEBUG("%s MP RQ support (%s %u strides per WQE and"
+			      " %u bytes per stride)",
+			      priv->hw_mp_rq ? "enabling" : "disabling",
+			      priv->hw_mp_rq ? "using" : "requested",
+			      MLX5_PMD_MP_STRIDES,
+			      MLX5_PMD_MP_BYTES);
+		}
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
 
 #else /* HAVE_EXP_QUERY_DEVICE */
 		priv->ind_table_max_size = RSS_INDIRECTION_TABLE_SIZE;

@@ -55,6 +55,7 @@
 #include <rte_malloc.h>
 #include <rte_ethdev.h>
 #include <rte_common.h>
+#include <rte_memory.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -887,6 +888,164 @@ rxq_free_elts(struct rxq *rxq)
 }
 
 /**
+ * Attempt to release as many MP RQ chunks as possible by freeing unused
+ * mbufs still pointing at them.
+ *
+ * @param rxq
+ *   Pointer to RX queue structure.
+ */
+void
+rxq_chunks_gc(struct rxq *rxq)
+{
+	struct rxq_chunk (*const chunks)[rxq->chunks_n] = rxq->chunks;
+	const unsigned int curr = rxq->chunks_curr;
+	unsigned int last = rxq->chunks_last;
+	unsigned int spent = rxq->chunks_spent;
+	unsigned int spent_n = rxq->chunks_spent_n;
+	unsigned int proc = spent;
+	unsigned int prev = spent;
+
+	assert(curr != RXQ_CHUNK_END);
+	assert(last != RXQ_CHUNK_END);
+	assert(spent_n != 0);
+	assert(spent_n < RTE_DIM(*chunks));
+	while (proc != curr) {
+		struct rxq_chunk *chunk = &(*chunks)[proc];
+		unsigned int next = chunk->next;
+		unsigned int i;
+
+		assert(spent_n);
+		for (i = 0; i != RTE_DIM(chunk->bufs); ++i) {
+			struct rte_mbuf *m = chunk->bufs[i];
+			uint16_t refcnt;
+
+			if (!m)
+				continue;
+			refcnt = rte_mbuf_refcnt_read(m);
+			assert(refcnt != 0);
+			/* Skip current chunk if at least one mbuf cannot
+			 * be released. */
+			if (refcnt != 1) {
+				prev = proc;
+				break;
+			}
+			/* Last refcount is ours, mbuf can be released. */
+			m->pool = rxq->mp;
+			rte_pktmbuf_detach(m);
+			rte_pktmbuf_free_seg(m);
+			chunk->bufs[i] = NULL;
+			if (--chunk->bufs_n)
+				continue;
+			/* No more mbufs pointing into this chunk, release it
+			 * and put it back at the end of the list. */
+			assert(spent_n);
+			--spent_n;
+			if (proc == spent) {
+				spent = next;
+				prev = next;
+			} else
+				(*chunks)[prev].next = next;
+			chunk->next = RXQ_CHUNK_END;
+			assert((*chunks)[last].next == RXQ_CHUNK_END);
+			(*chunks)[last].next = proc;
+			last = proc;
+			break;
+		}
+		proc = next;
+	}
+	rxq->chunks_last = last;
+	rxq->chunks_spent = spent;
+	rxq->chunks_spent_n = spent_n;
+}
+
+/**
+ * Allocate RX queue elements in MP RQ mode.
+ *
+ * @param rxq
+ *   Pointer to RX queue structure.
+ * @param chunks_n
+ *   Number of chunks to allocate.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+rxq_alloc_chunks(struct rxq *rxq, unsigned int chunks_n)
+{
+	unsigned int i;
+	struct rte_mempool *mp;
+	struct rxq_chunk (*chunks)[chunks_n] =
+		rte_calloc_socket("MP RQ chunks for mlx5",
+				  1,
+				  sizeof(*chunks) + sizeof(*mp),
+				  RTE_CACHE_LINE_SIZE,
+				  rxq->socket);
+
+	if (chunks == NULL) {
+		ERROR("%p: MP RQ chunks allocation failure", (void *)rxq);
+		return ENOMEM;
+	}
+	/* Build a fake mempool and use it as the memory region. */
+	mp = (void *)&(*chunks)[chunks_n];
+	if (rxq->mr)
+		claim_zero(ibv_dereg_mr(rxq->mr));
+	*mp = (struct rte_mempool){
+		.name = "MP RQ dummy mempool",
+		.phys_addr = rte_mem_virt2phy(chunks),
+		.size = sizeof(*chunks),
+		.elt_size = sizeof(*chunks),
+		.elt_va_start = (uintptr_t)chunks,
+		.elt_va_end = (uintptr_t)chunks + sizeof(*chunks),
+	};
+	rxq->mr = mlx5_mp2mr(rxq->priv->pd, mp);
+	if (rxq->mr == NULL) {
+		ERROR("%p: MP RQ MR creation failure: %s",
+		      (void *)rxq->priv->dev, strerror(EINVAL));
+		return EINVAL;
+	}
+	for (i = 0; i != RTE_DIM(*chunks); ++i) {
+		struct rxq_chunk *chunk = &(*chunks)[i];
+		struct ibv_sge *sge = &chunk->sge;
+
+		chunk->next = i + 1;
+		chunk->bufs_n = 0;
+		chunk->mp = mp;
+		assert(sizeof(sge->addr) >= sizeof(uintptr_t));
+		sge->addr = (uintptr_t)chunk->storage;
+		sge->length = sizeof(chunk->storage);
+		sge->lkey = rxq->mr->lkey;
+	}
+	(*chunks)[i - 1].next = RXQ_CHUNK_END;
+	DEBUG("%p: configured %u chunks", (void *)rxq, i);
+	rxq->chunks_n = chunks_n;
+	rxq->chunks_curr = 0;
+	rxq->chunks_last = i - 1;
+	rxq->chunks_spent = rxq->chunks_curr;
+	rxq->chunks_spent_n = 0;
+	rxq->chunks = chunks;
+	return 0;
+}
+
+/**
+ * Free RX queue elements in MP RQ mode.
+ *
+ * @param rxq
+ *   Pointer to RX queue structure.
+ */
+static void
+rxq_free_chunks(struct rxq *rxq)
+{
+	DEBUG("%p: cleaning up chunks", (void *)rxq);
+	rxq_chunks_gc(rxq);
+	if (rxq->chunks_spent_n)
+		WARN("%u out of %u MP RQ chunks are still in use,"
+		     " pool %p cannot be released.",
+		     rxq->chunks_spent_n, rxq->chunks_n, (void *)rxq->chunks);
+	else
+		rte_free(rxq->chunks);
+}
+
+/**
  * Clean up a RX queue.
  *
  * Destroy objects, free allocated memory and reset the structure for reuse.
@@ -900,7 +1059,9 @@ rxq_cleanup(struct rxq *rxq)
 	struct ibv_exp_release_intf_params params;
 
 	DEBUG("cleaning up %p", (void *)rxq);
-	if (rxq->sp)
+	if (rxq->mp_rq)
+		rxq_free_chunks(rxq);
+	else if (rxq->sp)
 		rxq_free_elts_sp(rxq);
 	else
 		rxq_free_elts(rxq);
@@ -989,7 +1150,8 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		rxq->csum_l2tun = tmpl.csum_l2tun;
 	}
 	/* Enable scattered packets support for this queue if necessary. */
-	if ((dev->data->dev_conf.rxmode.jumbo_frame) &&
+	if (!tmpl.mp_rq &&
+	    (dev->data->dev_conf.rxmode.jumbo_frame) &&
 	    (dev->data->dev_conf.rxmode.max_rx_pkt_len >
 	     (tmpl.mb_len - RTE_PKTMBUF_HEADROOM))) {
 		tmpl.sp = 1;
@@ -1003,6 +1165,8 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		DEBUG("%p: nothing to do", (void *)dev);
 		return 0;
 	}
+	/* Not supposed to be here with multi-packet RQs. */
+	assert(!tmpl.mp_rq);
 	/* From now on, any failure will render the queue unusable.
 	 * Reinitialize WQ. */
 	mod = (struct ibv_exp_wq_attr){
@@ -1173,18 +1337,26 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		ERROR("%p: unable to allocate mbuf", (void *)dev);
 		return ENOMEM;
 	}
-	tmpl.mb_len = buf->buf_len;
-	assert((rte_pktmbuf_headroom(buf) +
-		rte_pktmbuf_tailroom(buf)) == tmpl.mb_len);
-	assert(rte_pktmbuf_headroom(buf) == RTE_PKTMBUF_HEADROOM);
+	if (!tmpl.mp_rq) {
+		tmpl.mb_len = buf->buf_len;
+		assert((rte_pktmbuf_headroom(buf) +
+			rte_pktmbuf_tailroom(buf)) == tmpl.mb_len);
+		assert(rte_pktmbuf_headroom(buf) == RTE_PKTMBUF_HEADROOM);
+	}
 	rte_pktmbuf_free(buf);
 	/* Toggle RX checksum offload if hardware supports it. */
 	if (priv->hw_csum)
 		tmpl.csum = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
 	if (priv->hw_csum_l2tun)
 		tmpl.csum_l2tun = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
+	/* Use multi-packet RQ mode if supported. */
+	tmpl.mp_rq = !!priv->hw_mp_rq;
+	DEBUG("%p: %s multi-packet receive queue",
+	      (void *)dev,
+	      tmpl.mp_rq ? "enabling" : "disabling");
 	/* Enable scattered packets support for this queue if necessary. */
-	if ((dev->data->dev_conf.rxmode.jumbo_frame) &&
+	if (!tmpl.mp_rq &&
+	    (dev->data->dev_conf.rxmode.jumbo_frame) &&
 	    (dev->data->dev_conf.rxmode.max_rx_pkt_len >
 	     (tmpl.mb_len - RTE_PKTMBUF_HEADROOM))) {
 		tmpl.sp = 1;
@@ -1250,8 +1422,20 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
 			IBV_EXP_CREATE_WQ_VLAN_OFFLOADS |
 #endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+			(IBV_EXP_CREATE_WQ_MP_RQ * tmpl.mp_rq) |
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
 			0,
 		.res_domain = tmpl.rd,
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+		.mp_rq = (const struct ibv_exp_wq_mp_rq){
+			.use_shift = IBV_EXP_MP_RQ_NO_SHIFT,
+			.single_wqe_log_num_of_strides =
+				log2above(MLX5_PMD_MP_STRIDES),
+			.single_stride_log_num_of_bytes =
+				log2above(MLX5_PMD_MP_BYTES),
+		},
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
 		.vlan_offloads = (tmpl.vlan_strip ?
 				  IBV_EXP_RECEIVE_WQ_CVLAN_STRIP :
@@ -1304,7 +1488,9 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	if (tmpl.sp)
+	if (tmpl.mp_rq)
+		ret = rxq_alloc_chunks(&tmpl, desc);
+	else if (tmpl.sp)
 		ret = rxq_alloc_elts_sp(&tmpl, desc, NULL);
 	else
 		ret = rxq_alloc_elts(&tmpl, desc, NULL);
@@ -1318,9 +1504,10 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	DEBUG("%p: RTE port ID: %u", (void *)rxq, tmpl.port_id);
 	attr.params = (struct ibv_exp_query_intf_params){
 		.intf_scope = IBV_EXP_INTF_GLOBAL,
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
+#if defined(HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS) || \
+	defined(HAVE_VERBS_MULTI_PACKET_RQ)
 		.intf_version = 1,
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
+#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS || HAVE_VERBS_MULTI_PACKET_RQ */
 		.intf = IBV_EXP_INTF_CQ,
 		.obj = tmpl.cq,
 	};
@@ -1353,7 +1540,18 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		goto error;
 	}
 	/* Post SGEs. */
-	if (tmpl.sp) {
+	if (tmpl.mp_rq) {
+		struct rxq_chunk (*chunks)[tmpl.chunks_n] = tmpl.chunks;
+
+		for (i = 0; i != RTE_DIM(*chunks); ++i) {
+			ret = tmpl.if_wq->recv_burst
+				(tmpl.wq,
+				 &(*chunks)[i].sge,
+				 1);
+			if (ret)
+				break;
+		}
+	} else if (tmpl.sp) {
 		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts_sp;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
@@ -1391,13 +1589,24 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	assert(ret == 0);
 	/* Assign function in queue. */
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-	rxq->poll = rxq->if_cq->poll_length_flags_cvlan;
-#else /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
-	rxq->poll = rxq->if_cq->poll_length_flags;
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
-	if (rxq->sp)
-		rxq->recv = rxq->if_wq->recv_sg_list;
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+	if (rxq->mp_rq)
+		rxq->poll = rxq->if_cq->poll_length_flags_mp_rq_cvlan;
 	else
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
+		rxq->poll = rxq->if_cq->poll_length_flags_cvlan;
+#else /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
+#ifdef HAVE_VERBS_MULTI_PACKET_RQ
+	if (rxq->mp_rq)
+		rxq->poll = rxq->if_cq->poll_length_flags_mp_rq;
+	else
+#endif /* HAVE_VERBS_MULTI_PACKET_RQ */
+		rxq->poll = rxq->if_cq->poll_length_flags;
+#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
+	if (rxq->sp) {
+		assert(!rxq->mp_rq);
+		rxq->recv = rxq->if_wq->recv_sg_list;
+	} else
 		rxq->recv = rxq->if_wq->recv_burst;
 	return 0;
 error:
@@ -1473,7 +1682,9 @@ mlx5_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		      (void *)dev, (void *)rxq);
 		(*priv->rxqs)[idx] = rxq;
 		/* Update receive callback. */
-		if (rxq->sp)
+		if (rxq->mp_rq)
+			dev->rx_pkt_burst = mlx5_rx_burst_mp_rq;
+		else if (rxq->sp)
 			dev->rx_pkt_burst = mlx5_rx_burst_sp;
 		else
 			dev->rx_pkt_burst = mlx5_rx_burst;

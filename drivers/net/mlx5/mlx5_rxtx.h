@@ -93,6 +93,61 @@ struct rxq_elt {
 	struct rte_mbuf *buf; /* SGE buffer. */
 };
 
+/*
+ * MP RQ chunks are organized as follows:
+ *
+ *  .-- rxq.chunks_spent                .-- rxq.chunks_last
+ *  |                                   |
+ *  |        .-- rxq_chunk.next         |
+ *  |        |                          |
+ *  v        v                          v
+ *  _     _     _           _     _     _
+ * |_|-->|_|-->|_|-->...-->|_|-->|_|-->|_|--> RXQ_CHUNK_END
+ *
+ * |       |    ^                        |
+ * |       |    |                        |
+ * |       |    `-- rxq.chunks_curr      |
+ * |<----->|                             |
+ * |       `-- rxq.chunks_spent_n        |
+ * |                                     |
+ * |<----------------------------------->|
+ *                                       `-- rxq.chunks_n
+ *
+ * Spent chunks are chunks not part of the RX queue anymore, they normally
+ * contain data currently in use (mbufs pointing at them) and thus cannot
+ * be posted back into the RX queue immediately.
+ *
+ * There are rxq.chunks_spent_n such chunks, with rxq.chunks_spent
+ * referencing the first list element.
+ *
+ * The first chunk not spent yet (or still being processed) is referenced by
+ * rxq.chunks_curr, with rxq.chunks_last pointing to the last element of
+ * the list. List ends with special index RXQ_CHUNK_END.
+ *
+ * Spent chunks are recycled during GC, added back to the end of the
+ * list and posted back to the RX queue. rxq.chunks_last is updated
+ * accordingly.
+ *
+ * For performance reasons, the list cannot be empty and the last element
+ * is never spent (rxq.chunks_curr and rxq.chunks_last are always valid,
+ * rxq.chunks_n - rxq.chunks_spent_n cannot be 0). It is used to discard
+ * received packets.
+ */
+
+/* Multi-packet receive queue chunk. A chunk provides storage for
+ * MLX5_PMD_MP_STRIDES of MLX5_PMD_MP_BYTES and pointers to related
+ * indirect mbufs. */
+struct rxq_chunk {
+	unsigned int next; /* Next chunk in list. */
+	unsigned int bufs_n; /* Number of mbufs held for storage. */
+	struct rte_mempool *mp; /* Fake mempool for buffer data. */
+	struct ibv_sge sge; /* Scatter/gather element. */
+	struct rte_mbuf *bufs[MLX5_PMD_MP_STRIDES]; /* Captive mbufs. */
+	uint8_t storage[MLX5_PMD_MP_STRIDES * MLX5_PMD_MP_BYTES]; /* Data. */
+};
+
+#define RXQ_CHUNK_END ~0u
+
 /* Flow director queue structure. */
 struct fdir_queue {
 	struct ibv_qp *qp; /* Associated RX QP. */
@@ -110,23 +165,36 @@ struct rxq {
 	int32_t (*poll)(); /* Verbs poll function. */
 	int32_t (*recv)(); /* Verbs receive function. */
 	unsigned int port_id; /* Port ID for incoming packets. */
-	unsigned int elts_n; /* (*elts)[] length. */
-	unsigned int elts_head; /* Current index in (*elts)[]. */
+	union {
+		unsigned int elts_n; /* (*elts)[] length. */
+		unsigned int chunks_n; /* (*chunks)[] length. */
+	};
+	union {
+		unsigned int elts_head; /* Current index in (*elts)[]. */
+		unsigned int chunks_curr; /* Current chunk in (*chunks)[]. */
+	};
 	unsigned int sp:1; /* Use scattered RX elements. */
 	unsigned int csum:1; /* Enable checksum offloading. */
 	unsigned int csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
 	unsigned int crc_present:1; /* CRC must be subtracted. */
+	unsigned int mp_rq:1; /* Multi-packet RQ mode. */
 	union {
 		struct rxq_elt_sp (*elts_sp)[]; /* Scattered RX elements. */
 		struct rxq_elt (*elts)[]; /* RX elements. */
+		struct rxq_chunk (*chunks)[]; /* MP RQ chunks. */
 	};
-	uint32_t mb_len; /* Length of a mp-issued mbuf. */
+	unsigned int chunks_last; /* Index of the last chunk in list. */
+	unsigned int chunks_spent; /* Index of the first spent chunk. */
+	union {
+		uint32_t mb_len; /* Length of a mp-issued mbuf. */
+		unsigned int chunks_spent_n; /* Number of spent chunks. */
+	};
 	unsigned int socket; /* CPU socket ID for allocations. */
 	struct mlx5_rxq_stats stats; /* RX queue counters. */
 	struct ibv_exp_res_domain *rd; /* Resource Domain. */
 	struct fdir_queue fdir_queue; /* Flow director queue. */
-	struct ibv_mr *mr; /* Memory Region (for mp). */
+	struct ibv_mr *mr; /* Memory Region (for mp or chunks). */
 	struct ibv_exp_wq_family *if_wq; /* WQ burst interface. */
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
 	struct ibv_exp_cq_family_v1 *if_cq; /* CQ interface. */
@@ -316,6 +384,7 @@ int priv_create_hash_rxqs(struct priv *);
 void priv_destroy_hash_rxqs(struct priv *);
 int priv_allow_flow_type(struct priv *, enum hash_rxq_flow_type);
 int priv_rehash_flows(struct priv *);
+void rxq_chunks_gc(struct rxq *);
 void rxq_cleanup(struct rxq *);
 int rxq_rehash(struct rte_eth_dev *, struct rxq *);
 int rxq_setup(struct rte_eth_dev *, struct rxq *, uint16_t, unsigned int,
@@ -346,6 +415,7 @@ void txq_mp2mr_iter(const struct rte_mempool *, void *);
 uint16_t mlx5_tx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst_sp(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst(void *, struct rte_mbuf **, uint16_t);
+uint16_t mlx5_rx_burst_mp_rq(void *, struct rte_mbuf **, uint16_t);
 uint16_t removed_tx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t removed_rx_burst(void *, struct rte_mbuf **, uint16_t);
 

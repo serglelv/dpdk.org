@@ -105,6 +105,7 @@ struct priv {
 	unsigned int hw_vlan_strip:1; /* VLAN stripping is supported. */
 	unsigned int hw_fcs_strip:1; /* FCS stripping is supported. */
 	unsigned int hw_padding:1; /* End alignment padding is supported. */
+	unsigned int hw_mp_rq:1; /* Multi-packet RQs are supported. */
 	unsigned int vf:1; /* This is a VF device. */
 	unsigned int mps:1; /* Whether multi-packet send is supported. */
 	unsigned int pending_alarm:1; /* An alarm is pending. */

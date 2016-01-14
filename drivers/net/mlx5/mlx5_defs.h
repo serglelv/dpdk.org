@@ -54,6 +54,21 @@
 /* RSS Indirection table size. */
 #define RSS_INDIRECTION_TABLE_SIZE 256
 
+/* Number of strides per WQE for multi-packet receive queues (MP RQs). */
+#ifndef MLX5_PMD_MP_STRIDES
+#define MLX5_PMD_MP_STRIDES 512
+#endif
+
+/* Number of bytes per stride for MP RQs. */
+#ifndef MLX5_PMD_MP_BYTES
+#define MLX5_PMD_MP_BYTES 64
+#endif
+
+/* Number of chunks remaining in queue before triggering GC. */
+#ifndef MLX5_PMD_MP_THRESH
+#define MLX5_PMD_MP_THRESH 4
+#endif
+
 /* Maximum number of Scatter/Gather Elements per Work Request. */
 #ifndef MLX5_PMD_SGE_WR_N
 #define MLX5_PMD_SGE_WR_N 4

@@ -146,6 +146,11 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		infiniband/verbs.h \
 		enum IBV_EXP_RECEIVE_WQ_CVLAN_INSERTION \
 		$(AUTOCONF_OUTPUT)
+	$Q sh -- '$<' '$@' \
+		HAVE_VERBS_MULTI_PACKET_RQ \
+		infiniband/verbs.h \
+		enum IBV_EXP_DEVICE_ATTR_MP_RQ \
+		$(AUTOCONF_OUTPUT)
 
 $(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD):.c=.o): mlx5_autoconf.h
 

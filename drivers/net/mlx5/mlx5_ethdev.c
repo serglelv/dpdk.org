@@ -673,6 +673,7 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 	struct priv *priv = dev->data->dev_private;
 	int ret = 0;
 	unsigned int i;
+	unsigned int mp_rq_count = 0;
 	uint16_t (*rx_func)(void *, struct rte_mbuf **, uint16_t) =
 		mlx5_rx_burst;
 
@@ -704,6 +705,12 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 
 		if (rxq == NULL)
 			continue;
+		/* Nothing to do in MP RQ mode (mb_len is invalid and
+		 * rxq_rehash() does not need to be called). */
+		if (rxq->mp_rq) {
+			++mp_rq_count;
+			continue;
+		}
 		/* Calculate new maximum frame length according to MTU and
 		 * toggle scattered support (sp) if necessary. */
 		max_frame_len = (priv->mtu + ETHER_HDR_LEN +
@@ -722,6 +729,12 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 		/* Scattered burst function takes priority. */
 		if (rxq->sp)
 			rx_func = mlx5_rx_burst_sp;
+	}
+	if (mp_rq_count) {
+		/* All queues must be MP RQ. */
+		assert(mp_rq_count == i);
+		assert(rx_func == removed_rx_burst);
+		rx_func = mlx5_rx_burst_mp_rq;
 	}
 	/* Burst functions can now be called again. */
 	rte_wmb();
@@ -1056,17 +1069,17 @@ priv_set_link(struct priv *priv, int up)
 		err = priv_set_flags(priv, ~IFF_UP, IFF_UP);
 		if (err)
 			return err;
-		for (i = 0; i < priv->rxqs_n; i++)
-			if ((*priv->rxqs)[i]->sp)
-				break;
-		/* Check if an sp queue exists.
-		 * Note: Some old frames might be received.
-		 */
+		for (i = 0; i < priv->rxqs_n; i++) {
+			if ((*priv->rxqs)[i]->mp_rq)
+				dev->rx_pkt_burst = mlx5_rx_burst_mp_rq;
+			else if ((*priv->rxqs)[i]->sp)
+				dev->rx_pkt_burst = mlx5_rx_burst_sp;
+			else
+				continue;
+			break;
+		}
 		if (i == priv->rxqs_n)
-			dev->rx_pkt_burst = mlx5_rx_burst;
-		else
-			dev->rx_pkt_burst = mlx5_rx_burst_sp;
-		dev->tx_pkt_burst = mlx5_tx_burst;
+			dev->tx_pkt_burst = mlx5_tx_burst;
 	} else {
 		err = priv_set_flags(priv, ~IFF_UP, ~IFF_UP);
 		if (err)
