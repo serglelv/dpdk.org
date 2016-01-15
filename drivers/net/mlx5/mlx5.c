@@ -404,8 +404,8 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		DEBUG("maximum RX indirection table size is %u",
 		      priv->ind_table_max_size);
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-		priv->hw_vlan_strip = (exp_device_attr.wq_vlan_offloads_cap &
-				       IBV_EXP_RECEIVE_WQ_CVLAN_STRIP);
+		priv->hw_vlan_strip = !!(exp_device_attr.wq_vlan_offloads_cap &
+					 IBV_EXP_RECEIVE_WQ_CVLAN_STRIP);
 #endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 		DEBUG("VLAN stripping is %ssupported",
 		      (priv->hw_vlan_strip ? "" : "not "));
