@@ -256,6 +256,9 @@ struct txq {
 #if MLX5_PMD_MAX_INLINE > 0
 	int (*send_pending_inline)();
 #endif
+#if MLX5_PMD_SGE_WR_N > 1
+	int (*send_pending_sg_list)();
+#endif
 	int (*send_flush)(struct ibv_qp *qp);
 	struct ibv_cq *cq; /* Completion Queue. */
 	struct ibv_qp *qp; /* Queue Pair. */

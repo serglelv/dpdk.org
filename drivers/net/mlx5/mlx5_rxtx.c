@@ -574,7 +574,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			if (ret.length == (unsigned int)-1)
 				goto stop;
 			/* Put SG list into send queue. */
-			err = txq->send_pending
+			err = txq->send_pending_sg_list
 				(txq->qp,
 				 sges,
 				 ret.num,

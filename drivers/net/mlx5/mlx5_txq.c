@@ -423,10 +423,10 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 #if MLX5_PMD_MAX_INLINE > 0
 	txq->send_pending_inline = txq->if_qp->send_pending_inline;
 #endif
-	if (MLX5_PMD_SGE_WR_N > 1)
-		txq->send_pending = txq->if_qp->send_pending_sg_list;
-	else
-		txq->send_pending = txq->if_qp->send_pending;
+#if MLX5_PMD_SGE_WR_N > 1
+	txq->send_pending_sg_list = txq->if_qp->send_pending_sg_list;
+#endif
+	txq->send_pending = txq->if_qp->send_pending;
 	txq->send_flush = txq->if_qp->send_flush;
 	DEBUG("%p: txq updated with %p", (void *)txq, (void *)&tmpl);
 	/* Pre-register known mempools. */
