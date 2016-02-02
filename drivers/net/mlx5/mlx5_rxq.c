@@ -1256,6 +1256,16 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 				  0),
 #endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 	};
+
+#ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING
+	if (mlx5_getenv_int("MLX5_PMD_ENABLE_PADDING")) {
+		INFO("%p: packet padding is enabled on queue %p",
+		     (void *)dev, (void *)rxq);
+		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING;
+		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+	}
+#endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
+
 	tmpl.wq = ibv_exp_create_wq(priv->ctx, &attr.wq);
 	if (tmpl.wq == NULL) {
 		ret = (errno ? errno : EINVAL);

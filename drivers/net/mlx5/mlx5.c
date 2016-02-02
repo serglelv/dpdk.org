@@ -68,6 +68,25 @@
 #include "mlx5_defs.h"
 
 /**
+ * Retrieve integer value from environment variable.
+ *
+ * @param[in] name
+ *   Environment variable name.
+ *
+ * @return
+ *   Integer value, 0 if the variable is not set.
+ */
+int
+mlx5_getenv_int(const char *name)
+{
+	const char *val = getenv(name);
+
+	if (val == NULL)
+		return 0;
+	return atoi(val);
+}
+
+/**
  * DPDK callback to close the device.
  *
  * Destroy all queues and objects, free memory.

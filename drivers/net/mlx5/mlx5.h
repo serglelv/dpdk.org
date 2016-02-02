@@ -159,6 +159,10 @@ priv_unlock(struct priv *priv)
 	rte_spinlock_unlock(&priv->lock);
 }
 
+/* mlx5.c */
+
+int mlx5_getenv_int(const char *);
+
 /* mlx5_ethdev.c */
 
 struct priv *mlx5_get_priv(struct rte_eth_dev *dev);
