@@ -638,7 +638,7 @@ priv_fdir_filter_add(struct priv *priv,
 	enum rte_fdir_mode fdir_mode = priv->dev->data->dev_conf.fdir_conf.mode;
 	int err = 0;
 
-	/* Validate queue number */
+	/* Validate queue number. */
 	if (fdir_filter->action.rx_queue >= priv->rxqs_n) {
 		ERROR("invalid queue number %d", fdir_filter->action.rx_queue);
 		return EINVAL;
@@ -697,6 +697,12 @@ priv_fdir_filter_update(struct priv *priv,
 			const struct rte_eth_fdir_filter *fdir_filter)
 {
 	struct mlx5_fdir_filter *mlx5_fdir_filter;
+
+	/* Validate queue number */
+	if (fdir_filter->action.rx_queue >= priv->rxqs_n) {
+		ERROR("invalid queue number %d", fdir_filter->action.rx_queue);
+		return EINVAL;
+	}
 
 	mlx5_fdir_filter = priv_find_filter_in_list(priv, fdir_filter);
 	if (mlx5_fdir_filter != NULL) {
