@@ -133,15 +133,6 @@ typedef union {
 
 #define WR_ID(o) (((wr_id_t *)&(o))->data)
 
-/* Compile-time check. */
-static inline void wr_id_t_check(void)
-{
-	wr_id_t check[1 + (2 * -!(sizeof(wr_id_t) == sizeof(uint64_t)))];
-
-	(void)check;
-	(void)wr_id_t_check;
-}
-
 /* Transpose flags. Useful to convert IBV to DPDK flags. */
 #define TRANSPOSE(val, from, to) \
 	(((from) >= (to)) ? \
@@ -5742,6 +5733,8 @@ rte_mlx4_pmd_init(const char *name, const char *args)
 {
 	(void)name;
 	(void)args;
+
+	RTE_BUILD_BUG_ON(sizeof(wr_id_t) != sizeof(uint64_t));
 	/*
 	 * RDMAV_HUGEPAGES_SAFE tells ibv_fork_init() we intend to use
 	 * huge pages. Calling ibv_fork_init() during init allows
