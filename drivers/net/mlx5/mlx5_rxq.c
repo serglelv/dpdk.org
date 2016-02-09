@@ -1266,6 +1266,15 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	}
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
 
+#ifdef HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT
+	if (!dev->data->dev_conf.rxmode.hw_strip_crc) {
+		INFO("%p: FCS stripping is disabled on queue %p",
+		      (void *)dev, (void *)rxq);
+		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
+		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+	}
+#endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
+
 	tmpl.wq = ibv_exp_create_wq(priv->ctx, &attr.wq);
 	if (tmpl.wq == NULL) {
 		ret = (errno ? errno : EINVAL);

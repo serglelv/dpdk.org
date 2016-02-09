@@ -142,6 +142,11 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		infiniband/verbs.h \
 		enum IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING \
 		$(AUTOCONF_OUTPUT)
+	$Q sh -- '$<' '$@' \
+		HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT \
+		infiniband/verbs.h \
+		enum IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS \
+		$(AUTOCONF_OUTPUT)
 
 $(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD):.c=.o): mlx5_autoconf.h
 
