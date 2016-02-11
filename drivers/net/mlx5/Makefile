@@ -101,6 +101,10 @@ ifdef CONFIG_RTE_LIBRTE_MLX5_TX_MP_CACHE
 CFLAGS += -DMLX5_PMD_TX_MP_CACHE=$(CONFIG_RTE_LIBRTE_MLX5_TX_MP_CACHE)
 endif
 
+ifeq ($(CONFIG_RTE_LIBRTE_MLX5_VERBS_VLAN_INSERTION),y)
+CFLAGS += -DMLX5_VERBS_VLAN_INSERTION
+endif
+
 include $(RTE_SDK)/mk/rte.lib.mk
 
 # Generate and clean-up mlx5_autoconf.h.
@@ -146,6 +150,11 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT \
 		infiniband/verbs.h \
 		enum IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS \
+		$(AUTOCONF_OUTPUT)
+	$Q sh -- '$<' '$@' \
+		HAVE_VERBS_VLAN_INSERTION \
+		infiniband/verbs.h \
+		enum IBV_EXP_RECEIVE_WQ_CVLAN_INSERTION \
 		$(AUTOCONF_OUTPUT)
 
 $(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD):.c=.o): mlx5_autoconf.h

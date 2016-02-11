@@ -400,7 +400,11 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.intf_scope = IBV_EXP_INTF_GLOBAL,
 		.intf = IBV_EXP_INTF_QP_BURST,
 		.obj = tmpl.qp,
-#ifdef HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR
+#ifdef HAVE_VERBS_VLAN_INSERTION
+		.intf_version = 1,
+#endif
+#if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR) && \
+    !defined(MLX5_VERBS_VLAN_INSERTION)
 		/* Multi packet send WR can only be used outside of VF. */
 		.family_flags =
 			(!priv->vf ?
@@ -422,11 +426,20 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	txq->poll_cnt = txq->if_cq->poll_cnt;
 #if MLX5_PMD_MAX_INLINE > 0
 	txq->send_pending_inline = txq->if_qp->send_pending_inline;
+#ifdef MLX5_VERBS_VLAN_INSERTION
+	txq->send_pending_inline_vlan = txq->if_qp->send_pending_inline_vlan;
+#endif
 #endif
 #if MLX5_PMD_SGE_WR_N > 1
 	txq->send_pending_sg_list = txq->if_qp->send_pending_sg_list;
+#ifdef MLX5_VERBS_VLAN_INSERTION
+	txq->send_pending_sg_list_vlan = txq->if_qp->send_pending_sg_list_vlan;
+#endif
 #endif
 	txq->send_pending = txq->if_qp->send_pending;
+#ifdef MLX5_VERBS_VLAN_INSERTION
+	txq->send_pending_vlan = txq->if_qp->send_pending_vlan;
+#endif
 	txq->send_flush = txq->if_qp->send_flush;
 	DEBUG("%p: txq updated with %p", (void *)txq, (void *)&tmpl);
 	/* Pre-register known mempools. */
