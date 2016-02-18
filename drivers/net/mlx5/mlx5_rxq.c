@@ -1106,6 +1106,10 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		err = EIO;
 		goto error;
 	}
+	if (tmpl.sp)
+		tmpl.recv = tmpl.if_wq->recv_sg_list;
+	else
+		tmpl.recv = tmpl.if_wq->recv_burst;
 error:
 	*rxq = tmpl;
 	assert(err >= 0);
