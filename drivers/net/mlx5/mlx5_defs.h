@@ -59,11 +59,6 @@
 #define MLX5_PMD_SGE_WR_N 4
 #endif
 
-/* Maximum size for inline data. */
-#ifndef MLX5_PMD_MAX_INLINE
-#define MLX5_PMD_MAX_INLINE 0
-#endif
-
 /*
  * Maximum number of cached Memory Pools (MPs) per TX queue. Each RTE MP
  * from which buffers are to be transmitted will have to be mapped by this

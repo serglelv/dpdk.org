@@ -188,9 +188,6 @@ txq_cleanup(struct txq *txq)
 	DEBUG("cleaning up %p", (void *)txq);
 	txq_free_elts(txq);
 	txq->poll_cnt = NULL;
-#if MLX5_PMD_MAX_INLINE > 0
-	txq->send_pending_inline = NULL;
-#endif
 	txq->send_flush = NULL;
 	if (txq->if_qp != NULL) {
 		assert(txq->priv != NULL);
@@ -325,9 +322,6 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 					  MLX5_PMD_SGE_WR_N) ?
 					 priv->device_attr.max_sge :
 					 MLX5_PMD_SGE_WR_N),
-#if MLX5_PMD_MAX_INLINE > 0
-			.max_inline_data = MLX5_PMD_MAX_INLINE,
-#endif
 		},
 		.qp_type = IBV_QPT_RAW_PACKET,
 		/* Do *NOT* enable this, completions events are managed per
@@ -345,10 +339,6 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-#if MLX5_PMD_MAX_INLINE > 0
-	/* ibv_create_qp() updates this value. */
-	tmpl.max_inline = attr.init.cap.max_inline_data;
-#endif
 	attr.mod = (struct ibv_exp_qp_attr){
 		/* Move the QP to this state. */
 		.qp_state = IBV_QPS_INIT,
@@ -424,12 +414,6 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	txq_cleanup(txq);
 	*txq = tmpl;
 	txq->poll_cnt = txq->if_cq->poll_cnt;
-#if MLX5_PMD_MAX_INLINE > 0
-	txq->send_pending_inline = txq->if_qp->send_pending_inline;
-#ifdef MLX5_VERBS_VLAN_INSERTION
-	txq->send_pending_inline_vlan = txq->if_qp->send_pending_inline_vlan;
-#endif
-#endif
 #if MLX5_PMD_SGE_WR_N > 1
 	txq->send_pending_sg_list = txq->if_qp->send_pending_sg_list;
 #ifdef MLX5_VERBS_VLAN_INSERTION
