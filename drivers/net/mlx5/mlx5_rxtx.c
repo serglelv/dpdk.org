@@ -237,13 +237,8 @@ txq_mp2mr(struct ftxq *txq, const struct rte_mempool *mp)
 
 static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-	       uintptr_t addr, uint32_t length, uint32_t lkey,
-	       uint32_t send_flags)
+	       uintptr_t addr, uint32_t length, uint32_t lkey)
 {
-
-	if (send_flags & IBV_EXP_QP_BURST_IP_CSUM)
-		wqe->eseg.cs_flags = MLX5_ETH_WQE_L3_CSUM |
-			MLX5_ETH_WQE_L4_CSUM;
 
 	/* Copy the first 16 bytes into the inline header */
 	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
@@ -368,7 +363,6 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		uint32_t length;
 		uint32_t lkey;
 		uintptr_t buf_next_addr;
-		uint32_t send_flags = 0;
 
 		wqe = &(*txq->wqes)[elts_head];
 		rte_prefetch0(wqe);
@@ -377,13 +371,16 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Should we enable HW CKSUM offload */
 		if (buf->ol_flags &
 		    (PKT_TX_IP_CKSUM | PKT_TX_TCP_CKSUM | PKT_TX_UDP_CKSUM)) {
-			send_flags |= IBV_EXP_QP_BURST_IP_CSUM;
+			wqe->eseg.cs_flags = MLX5_ETH_WQE_L3_CSUM |
+				MLX5_ETH_WQE_L4_CSUM;
+#if 0 /* Currently IBV_EXP_QP_BURST_TUNNEL is not used anywhere else. */
 			/* HW does not support checksum offloads at arbitrary
 			 * offsets but automatically recognizes the packet
 			 * type. For inner L3/L4 checksums, only VXLAN (UDP)
 			 * tunnels are currently supported. */
 			if (RTE_ETH_IS_TUNNEL_PKT(buf->packet_type))
 				send_flags |= IBV_EXP_QP_BURST_TUNNEL;
+#endif
 		}
 		/* Retrieve buffer information. */
 		addr = rte_pktmbuf_mtod(buf, uintptr_t);
@@ -399,7 +396,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		}
 		/* Retrieve Memory Region key for this memory pool. */
 		lkey = txq_mp2mr(txq, txq_mb2mp(buf));
-		mlx5_wqe_write(txq, wqe, addr, length, lkey, send_flags);
+		mlx5_wqe_write(txq, wqe, addr, length, lkey);
 #ifdef MLX5_PMD_SOFT_COUNTERS
 			sent_size += length;
 #endif
