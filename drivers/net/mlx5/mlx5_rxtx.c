@@ -194,40 +194,6 @@ txq_mp2mr(struct txq *txq, const struct rte_mempool *mp)
 	return lkey;
 }
 
-#ifndef MLX5_VERBS_VLAN_INSERTION
-
-/**
- * Insert VLAN to specific packet, using the mbuf's headroom space.
- *
- * @param buf
- *   Buffer to insert the vlan.
- *
- * @return
- *   0 on success, errno value on failure.
- */
-static inline int
-insert_vlan_sw(struct rte_mbuf *buf)
-{
-	uintptr_t addr;
-	uint32_t vlan;
-	uint16_t head_room_len = rte_pktmbuf_headroom(buf);
-
-	if (head_room_len < 4)
-		return EINVAL;
-
-	addr = rte_pktmbuf_mtod(buf, uintptr_t);
-	vlan = htonl(0x81000000 | buf->vlan_tci);
-	memmove((void *)(addr - 4), (void *)addr, 12);
-	memcpy((void *)(addr + 8), &vlan, sizeof(vlan));
-
-	SET_DATA_OFF(buf, head_room_len - 4);
-	DATA_LEN(buf) += 4;
-
-	return 0;
-}
-
-#endif /* !MLX5_VERBS_VLAN_INSERTION */
-
 /**
  * DPDK callback for TX.
  *
@@ -301,14 +267,6 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			if (RTE_ETH_IS_TUNNEL_PKT(buf->packet_type))
 				send_flags |= IBV_EXP_QP_BURST_TUNNEL;
 		}
-#ifndef MLX5_VERBS_VLAN_INSERTION
-		if (buf->ol_flags & PKT_TX_VLAN_PKT) {
-			err = insert_vlan_sw(buf);
-
-			if (unlikely(err))
-				goto stop;
-		}
-#endif /* !MLX5_VERBS_VLAN_INSERTION */
 		/* Retrieve buffer information. */
 		addr = rte_pktmbuf_mtod(buf, uintptr_t);
 		length = DATA_LEN(buf);
@@ -335,23 +293,12 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			(*txq->elts)[elts_head] = NULL;
 			goto stop;
 		}
-#ifdef MLX5_VERBS_VLAN_INSERTION
-		if (buf->ol_flags & PKT_TX_VLAN_PKT)
-			err = txq->send_pending_vlan
-				(txq->qp,
-				 addr,
-				 length,
-				 lkey,
-				 send_flags,
-				 &buf->vlan_tci);
-		else
-#endif /* MLX5_VERBS_VLAN_INSERTION */
-			err = txq->send_pending
-				(txq->qp,
-				 addr,
-				 length,
-				 lkey,
-				 send_flags);
+		err = txq->send_pending
+			(txq->qp,
+			 addr,
+			 length,
+			 lkey,
+			 send_flags);
 		if (unlikely(err))
 			goto stop;
 #ifdef MLX5_PMD_SOFT_COUNTERS

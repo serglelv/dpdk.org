@@ -85,12 +85,4 @@
 #define MLX5_FDIR_SUPPORT 1
 #endif
 
-/*
- * Verify user configuration, and prevent compilation when user ask
- * for HW vlan insertion but it is not supported by MLNX_OFED.
- */
-#if defined(MLX5_VERBS_VLAN_INSERTION) && !defined(HAVE_VERBS_VLAN_INSERTION)
-#error CONFIG_RTE_LIBRTE_MLX5_VERBS_VLAN_INSERTION enabled in configuration but unsupported by libibverbs.
-#endif
-
 #endif /* RTE_PMD_MLX5_DEFS_H_ */
