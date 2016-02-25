@@ -81,18 +81,6 @@ struct mlx5_txq_stats {
 	uint64_t odropped; /**< Total of packets not sent when TX ring full. */
 };
 
-/* RX element (scattered packets). */
-struct rxq_elt_sp {
-	struct ibv_sge sges[MLX5_PMD_SGE_WR_N]; /* Scatter/Gather Elements. */
-	struct rte_mbuf *bufs[MLX5_PMD_SGE_WR_N]; /* SGEs buffers. */
-};
-
-/* RX element. */
-struct rxq_elt {
-	struct ibv_sge sge; /* Scatter/Gather Element. */
-	struct rte_mbuf *buf; /* SGE buffer. */
-};
-
 /* Flow director queue structure. */
 struct fdir_queue {
 	struct ibv_qp *qp; /* Associated RX QP. */
@@ -112,14 +100,10 @@ struct rxq {
 	unsigned int port_id; /* Port ID for incoming packets. */
 	unsigned int elts_n; /* (*elts)[] length. */
 	unsigned int elts_head; /* Current index in (*elts)[]. */
-	unsigned int sp:1; /* Use scattered RX elements. */
 	unsigned int csum:1; /* Enable checksum offloading. */
 	unsigned int csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
-	union {
-		struct rxq_elt_sp (*sp)[]; /* Scattered RX elements. */
-		struct rxq_elt (*no_sp)[]; /* RX elements. */
-	} elts;
+	struct rte_mbuf *(*elts)[]; /* RX elements. */
 	uint32_t mb_len; /* Length of a mp-issued mbuf. */
 	unsigned int socket; /* CPU socket ID for allocations. */
 	struct mlx5_rxq_stats stats; /* RX queue counters. */
@@ -235,11 +219,6 @@ struct hash_rxq {
 	struct ibv_exp_flow *special_flow[MLX5_MAX_SPECIAL_FLOWS][MLX5_MAX_VLAN_IDS];
 };
 
-/* TX element. */
-struct txq_elt {
-	struct rte_mbuf *buf;
-};
-
 /* Linear buffer type. It is used when transmitting buffers with too many
  * segments that do not fit the hardware queue (see max_send_sge).
  * Extra segments are copied (linearized) in such buffers, replacing the
@@ -256,16 +235,10 @@ struct txq {
 #ifdef MLX5_VERBS_VLAN_INSERTION
 	int (*send_pending_vlan)();
 #endif
-#if MLX5_PMD_SGE_WR_N > 1
-	int (*send_pending_sg_list)();
-#ifdef MLX5_VERBS_VLAN_INSERTION
-	int (*send_pending_sg_list_vlan)();
-#endif
-#endif
 	int (*send_flush)(struct ibv_qp *qp);
 	struct ibv_cq *cq; /* Completion Queue. */
 	struct ibv_qp *qp; /* Queue Pair. */
-	struct txq_elt (*elts)[]; /* TX elements. */
+	struct rte_mbuf *(*elts)[]; /* TX elements. */
 	unsigned int elts_n; /* (*elts)[] length. */
 	unsigned int elts_head; /* Current index in (*elts)[]. */
 	unsigned int elts_tail; /* First element awaiting completion. */

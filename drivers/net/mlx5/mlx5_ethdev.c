@@ -931,22 +931,12 @@ priv_set_link(struct priv *priv, int up)
 {
 	struct rte_eth_dev *dev = priv->dev;
 	int err;
-	unsigned int i;
 
 	if (up) {
 		err = priv_set_flags(priv, ~IFF_UP, IFF_UP);
 		if (err)
 			return err;
-		for (i = 0; i < priv->rxqs_n; i++)
-			if ((*priv->rxqs)[i]->sp)
-				break;
-		/* Check if an sp queue exists.
-		 * Note: Some old frames might be received.
-		 */
-		if (i == priv->rxqs_n)
-			dev->rx_pkt_burst = mlx5_rx_burst;
-		else
-			dev->rx_pkt_burst = mlx5_rx_burst_sp;
+		dev->rx_pkt_burst = mlx5_rx_burst;
 		dev->tx_pkt_burst = mlx5_tx_burst;
 	} else {
 		err = priv_set_flags(priv, ~IFF_UP, ~IFF_UP);
@@ -1088,7 +1078,7 @@ mlx5_secondary_data_setup(struct priv *priv)
 		if (txq != NULL) {
 			if (txq_setup(priv->dev,
 				      txq,
-				      primary_txq->elts_n * MLX5_PMD_SGE_WR_N,
+				      primary_txq->elts_n,
 				      primary_txq->socket,
 				      NULL) == 0) {
 				txq->stats.idx = primary_txq->stats.idx;

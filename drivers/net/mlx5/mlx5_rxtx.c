@@ -114,20 +114,19 @@ txq_complete(struct txq *txq)
 		elts_tail -= elts_n;
 
 	while (elts_free != elts_tail) {
-		struct txq_elt *elt = &(*txq->elts)[elts_free];
+		struct rte_mbuf *elt = (*txq->elts)[elts_free];
 		unsigned int elts_free_next =
 			(((elts_free + 1) == elts_n) ? 0 : elts_free + 1);
-		struct rte_mbuf *tmp = elt->buf;
-		struct txq_elt *elt_next = &(*txq->elts)[elts_free_next];
+		struct rte_mbuf *elt_next = (*txq->elts)[elts_free_next];
 
-		RTE_MBUF_PREFETCH_TO_FREE(elt_next->buf);
+		RTE_MBUF_PREFETCH_TO_FREE(elt_next);
 		/* Faster than rte_pktmbuf_free(). */
 		do {
-			struct rte_mbuf *next = NEXT(tmp);
+			struct rte_mbuf *next = NEXT(elt);
 
-			rte_pktmbuf_free_seg(tmp);
-			tmp = next;
-		} while (tmp != NULL);
+			rte_pktmbuf_free_seg(elt);
+			elt = next;
+		} while (elt != NULL);
 		elts_free = elts_free_next;
 	}
 
@@ -229,156 +228,6 @@ insert_vlan_sw(struct rte_mbuf *buf)
 
 #endif /* !MLX5_VERBS_VLAN_INSERTION */
 
-#if MLX5_PMD_SGE_WR_N > 1
-
-/**
- * Copy scattered mbuf contents to a single linear buffer.
- *
- * @param[out] linear
- *   Linear output buffer.
- * @param[in] buf
- *   Scattered input buffer.
- *
- * @return
- *   Number of bytes copied to the output buffer or 0 if not large enough.
- */
-static unsigned int
-linearize_mbuf(linear_t *linear, struct rte_mbuf *buf)
-{
-	unsigned int size = 0;
-	unsigned int offset;
-
-	do {
-		unsigned int len = DATA_LEN(buf);
-
-		offset = size;
-		size += len;
-		if (unlikely(size > sizeof(*linear)))
-			return 0;
-		memcpy(&(*linear)[offset],
-		       rte_pktmbuf_mtod(buf, uint8_t *),
-		       len);
-		buf = NEXT(buf);
-	} while (buf != NULL);
-	return size;
-}
-
-/**
- * Handle scattered buffers for mlx5_tx_burst().
- *
- * @param txq
- *   TX queue structure.
- * @param segs
- *   Number of segments in buf.
- * @param elt
- *   TX queue element to fill.
- * @param[in] buf
- *   Buffer to process.
- * @param elts_head
- *   Index of the linear buffer to use if necessary (normally txq->elts_head).
- * @param[out] sges
- *   Array filled with SGEs on success.
- *
- * @return
- *   A structure containing the processed packet size in bytes and the
- *   number of SGEs. Both fields are set to (unsigned int)-1 in case of
- *   failure.
- */
-static struct tx_burst_sg_ret {
-	unsigned int length;
-	unsigned int num;
-}
-tx_burst_sg(struct txq *txq, unsigned int segs, struct txq_elt *elt,
-	    struct rte_mbuf *buf, unsigned int elts_head,
-	    struct ibv_sge (*sges)[MLX5_PMD_SGE_WR_N])
-{
-	unsigned int sent_size = 0;
-	unsigned int j;
-	int linearize = 0;
-
-	/* When there are too many segments, extra segments are
-	 * linearized in the last SGE. */
-	if (unlikely(segs > RTE_DIM(*sges))) {
-		segs = (RTE_DIM(*sges) - 1);
-		linearize = 1;
-	}
-	/* Update element. */
-	elt->buf = buf;
-	/* Register segments as SGEs. */
-	for (j = 0; (j != segs); ++j) {
-		struct ibv_sge *sge = &(*sges)[j];
-		uint32_t lkey;
-
-		/* Retrieve Memory Region key for this memory pool. */
-		lkey = txq_mp2mr(txq, txq_mb2mp(buf));
-		if (unlikely(lkey == (uint32_t)-1)) {
-			/* MR does not exist. */
-			DEBUG("%p: unable to get MP <-> MR association",
-			      (void *)txq);
-			/* Clean up TX element. */
-			elt->buf = NULL;
-			goto stop;
-		}
-		/* Update SGE. */
-		sge->addr = rte_pktmbuf_mtod(buf, uintptr_t);
-		if (txq->priv->vf)
-			rte_prefetch0((volatile void *)
-				      (uintptr_t)sge->addr);
-		sge->length = DATA_LEN(buf);
-		sge->lkey = lkey;
-		sent_size += sge->length;
-		buf = NEXT(buf);
-	}
-	/* If buf is not NULL here and is not going to be linearized,
-	 * nb_segs is not valid. */
-	assert(j == segs);
-	assert((buf == NULL) || (linearize));
-	/* Linearize extra segments. */
-	if (linearize) {
-		struct ibv_sge *sge = &(*sges)[segs];
-		linear_t *linear = &(*txq->elts_linear)[elts_head];
-		unsigned int size = linearize_mbuf(linear, buf);
-
-		assert(segs == (RTE_DIM(*sges) - 1));
-		if (size == 0) {
-			/* Invalid packet. */
-			DEBUG("%p: packet too large to be linearized.",
-			      (void *)txq);
-			/* Clean up TX element. */
-			elt->buf = NULL;
-			goto stop;
-		}
-		/* If MLX5_PMD_SGE_WR_N is 1, free mbuf immediately. */
-		if (RTE_DIM(*sges) == 1) {
-			do {
-				struct rte_mbuf *next = NEXT(buf);
-
-				rte_pktmbuf_free_seg(buf);
-				buf = next;
-			} while (buf != NULL);
-			elt->buf = NULL;
-		}
-		/* Update SGE. */
-		sge->addr = (uintptr_t)&(*linear)[0];
-		sge->length = size;
-		sge->lkey = txq->mr_linear->lkey;
-		sent_size += size;
-		/* Include last segment. */
-		segs++;
-	}
-	return (struct tx_burst_sg_ret){
-		.length = sent_size,
-		.num = segs,
-	};
-stop:
-	return (struct tx_burst_sg_ret){
-		.length = -1,
-		.num = -1,
-	};
-}
-
-#endif /* MLX5_PMD_SGE_WR_N > 1 */
-
 /**
  * DPDK callback for TX.
  *
@@ -424,12 +273,14 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		struct rte_mbuf *buf_next = pkts[i + 1];
 		unsigned int elts_head_next =
 			(((elts_head + 1) == elts_n) ? 0 : elts_head + 1);
-		struct txq_elt *elt = &(*txq->elts)[elts_head];
-		unsigned int segs = NB_SEGS(buf);
 #ifdef MLX5_PMD_SOFT_COUNTERS
 		unsigned int sent_size = 0;
 #endif
 		uint32_t send_flags = 0;
+		uintptr_t addr;
+		uint32_t length;
+		uint32_t lkey;
+		uintptr_t buf_next_addr;
 
 		if (i + 1 < max)
 			rte_prefetch0(buf_next);
@@ -458,96 +309,54 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 				goto stop;
 		}
 #endif /* !MLX5_VERBS_VLAN_INSERTION */
-		if (likely(segs == 1)) {
-			uintptr_t addr;
-			uint32_t length;
-			uint32_t lkey;
-			uintptr_t buf_next_addr;
-
-			/* Retrieve buffer information. */
-			addr = rte_pktmbuf_mtod(buf, uintptr_t);
-			length = DATA_LEN(buf);
-			/* Update element. */
-			elt->buf = buf;
-			if (txq->priv->vf)
-				rte_prefetch0((volatile void *)
-					      (uintptr_t)addr);
-			/* Prefetch next buffer data. */
-			if (i + 1 < max) {
-				buf_next_addr =
-					rte_pktmbuf_mtod(buf_next, uintptr_t);
-				rte_prefetch0((volatile void *)
-					      (uintptr_t)buf_next_addr);
-			}
-			/* Put packet into send queue. */
-			/* Retrieve Memory Region key for this memory pool. */
-			lkey = txq_mp2mr(txq, txq_mb2mp(buf));
-			if (unlikely(lkey == (uint32_t)-1)) {
-				/* MR does not exist. */
-				DEBUG("%p: unable to get MP <-> MR"
-				      " association", (void *)txq);
-				/* Clean up TX element. */
-				elt->buf = NULL;
-				goto stop;
-			}
-#ifdef MLX5_VERBS_VLAN_INSERTION
-			if (buf->ol_flags & PKT_TX_VLAN_PKT)
-				err = txq->send_pending_vlan
-					(txq->qp,
-					 addr,
-					 length,
-					 lkey,
-					 send_flags,
-					 &buf->vlan_tci);
-			else
-#endif /* MLX5_VERBS_VLAN_INSERTION */
-				err = txq->send_pending
-					(txq->qp,
-					 addr,
-					 length,
-					 lkey,
-					 send_flags);
-			if (unlikely(err))
-				goto stop;
-#ifdef MLX5_PMD_SOFT_COUNTERS
-			sent_size += length;
-#endif
-		} else {
-#if MLX5_PMD_SGE_WR_N > 1
-			struct ibv_sge sges[MLX5_PMD_SGE_WR_N];
-			struct tx_burst_sg_ret ret;
-
-			ret = tx_burst_sg(txq, segs, elt, buf, elts_head,
-					  &sges);
-			if (ret.length == (unsigned int)-1)
-				goto stop;
-			/* Put SG list into send queue. */
-#ifdef MLX5_VERBS_VLAN_INSERTION
-			if (buf->ol_flags & PKT_TX_VLAN_PKT)
-				err = txq->send_pending_sg_list_vlan
-					(txq->qp,
-					 sges,
-					 ret.num,
-					 send_flags,
-					 &buf->vlan_tci);
-			else
-#endif /* MLX5_VERBS_VLAN_INSERTION */
-				err = txq->send_pending_sg_list
-					(txq->qp,
-					 sges,
-					 ret.num,
-					 send_flags);
-			if (unlikely(err))
-				goto stop;
-#ifdef MLX5_PMD_SOFT_COUNTERS
-			sent_size += ret.length;
-#endif
-#else /* MLX5_PMD_SGE_WR_N > 1 */
-			DEBUG("%p: TX scattered buffers support not"
-			      " compiled in", (void *)txq);
-			goto stop;
-#endif /* MLX5_PMD_SGE_WR_N > 1 */
+		/* Retrieve buffer information. */
+		addr = rte_pktmbuf_mtod(buf, uintptr_t);
+		length = DATA_LEN(buf);
+		/* Update element. */
+		(*txq->elts)[elts_head] = buf;
+		if (txq->priv->vf)
+			rte_prefetch0((volatile void *)
+					(uintptr_t)addr);
+		/* Prefetch next buffer data. */
+		if (i + 1 < max) {
+			buf_next_addr =
+				rte_pktmbuf_mtod(buf_next, uintptr_t);
+			rte_prefetch0((volatile void *)
+					(uintptr_t)buf_next_addr);
 		}
+		/* Put packet into send queue. */
+		/* Retrieve Memory Region key for this memory pool. */
+		lkey = txq_mp2mr(txq, txq_mb2mp(buf));
+		if (unlikely(lkey == (uint32_t)-1)) {
+			/* MR does not exist. */
+			DEBUG("%p: unable to get MP <-> MR"
+					" association", (void *)txq);
+			/* Clean up TX element. */
+			(*txq->elts)[elts_head] = NULL;
+			goto stop;
+		}
+#ifdef MLX5_VERBS_VLAN_INSERTION
+		if (buf->ol_flags & PKT_TX_VLAN_PKT)
+			err = txq->send_pending_vlan
+				(txq->qp,
+				 addr,
+				 length,
+				 lkey,
+				 send_flags,
+				 &buf->vlan_tci);
+		else
+#endif /* MLX5_VERBS_VLAN_INSERTION */
+			err = txq->send_pending
+				(txq->qp,
+				 addr,
+				 length,
+				 lkey,
+				 send_flags);
+		if (unlikely(err))
+			goto stop;
+#ifdef MLX5_PMD_SOFT_COUNTERS
+		sent_size += length;
+#endif
 		elts_head = elts_head_next;
 		buf = buf_next;
 #ifdef MLX5_PMD_SOFT_COUNTERS
@@ -667,209 +476,6 @@ rxq_cq_to_ol_flags(const struct rxq *rxq, uint32_t flags)
 }
 
 /**
- * DPDK callback for RX with scattered packets support.
- *
- * @param dpdk_rxq
- *   Generic pointer to RX queue structure.
- * @param[out] pkts
- *   Array to store received packets.
- * @param pkts_n
- *   Maximum number of packets in array.
- *
- * @return
- *   Number of packets successfully received (<= pkts_n).
- */
-uint16_t
-mlx5_rx_burst_sp(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
-{
-	struct rxq *rxq = (struct rxq *)dpdk_rxq;
-	struct rxq_elt_sp (*elts)[rxq->elts_n] = rxq->elts.sp;
-	const unsigned int elts_n = rxq->elts_n;
-	unsigned int elts_head = rxq->elts_head;
-	unsigned int i;
-	unsigned int pkts_ret = 0;
-	int ret;
-
-	if (unlikely(!rxq->sp))
-		return mlx5_rx_burst(dpdk_rxq, pkts, pkts_n);
-	if (unlikely(elts == NULL)) /* See RTE_DEV_CMD_SET_MTU. */
-		return 0;
-	for (i = 0; (i != pkts_n); ++i) {
-		struct rxq_elt_sp *elt = &(*elts)[elts_head];
-		unsigned int len;
-		unsigned int pkt_buf_len;
-		struct rte_mbuf *pkt_buf = NULL; /* Buffer returned in pkts. */
-		struct rte_mbuf **pkt_buf_next = &pkt_buf;
-		unsigned int seg_headroom = RTE_PKTMBUF_HEADROOM;
-		unsigned int j = 0;
-		uint32_t flags;
-		uint16_t vlan_tci;
-
-		/* Sanity checks. */
-		assert(elts_head < rxq->elts_n);
-		assert(rxq->elts_head < rxq->elts_n);
-		ret = rxq->poll(rxq->cq, NULL, NULL, &flags, &vlan_tci);
-		if (unlikely(ret < 0)) {
-			struct ibv_wc wc;
-			int wcs_n;
-
-			DEBUG("rxq=%p, poll_length() failed (ret=%d)",
-			      (void *)rxq, ret);
-			/* ibv_poll_cq() must be used in case of failure. */
-			wcs_n = ibv_poll_cq(rxq->cq, 1, &wc);
-			if (unlikely(wcs_n == 0))
-				break;
-			if (unlikely(wcs_n < 0)) {
-				DEBUG("rxq=%p, ibv_poll_cq() failed (wcs_n=%d)",
-				      (void *)rxq, wcs_n);
-				break;
-			}
-			assert(wcs_n == 1);
-			if (unlikely(wc.status != IBV_WC_SUCCESS)) {
-				/* Whatever, just repost the offending WR. */
-				DEBUG("rxq=%p, wr_id=%" PRIu64 ": bad work"
-				      " completion status (%d): %s",
-				      (void *)rxq, wc.wr_id, wc.status,
-				      ibv_wc_status_str(wc.status));
-#ifdef MLX5_PMD_SOFT_COUNTERS
-				/* Increment dropped packets counter. */
-				++rxq->stats.idropped;
-#endif
-				goto repost;
-			}
-			ret = wc.byte_len;
-		}
-		if (ret == 0)
-			break;
-		len = ret;
-		pkt_buf_len = len;
-		/*
-		 * Replace spent segments with new ones, concatenate and
-		 * return them as pkt_buf.
-		 */
-		while (1) {
-			struct ibv_sge *sge = &elt->sges[j];
-			struct rte_mbuf *seg = elt->bufs[j];
-			struct rte_mbuf *rep;
-			unsigned int seg_tailroom;
-
-			assert(seg != NULL);
-			/*
-			 * Fetch initial bytes of packet descriptor into a
-			 * cacheline while allocating rep.
-			 */
-			rte_prefetch0(seg);
-			rep = __rte_mbuf_raw_alloc(rxq->mp);
-			if (unlikely(rep == NULL)) {
-				/*
-				 * Unable to allocate a replacement mbuf,
-				 * repost WR.
-				 */
-				DEBUG("rxq=%p: can't allocate a new mbuf",
-				      (void *)rxq);
-				if (pkt_buf != NULL) {
-					*pkt_buf_next = NULL;
-					rte_pktmbuf_free(pkt_buf);
-				}
-				/* Increment out of memory counters. */
-				++rxq->stats.rx_nombuf;
-				++rxq->priv->dev->data->rx_mbuf_alloc_failed;
-				goto repost;
-			}
-#ifndef NDEBUG
-			/* Poison user-modifiable fields in rep. */
-			NEXT(rep) = (void *)((uintptr_t)-1);
-			SET_DATA_OFF(rep, 0xdead);
-			DATA_LEN(rep) = 0xd00d;
-			PKT_LEN(rep) = 0xdeadd00d;
-			NB_SEGS(rep) = 0x2a;
-			PORT(rep) = 0x2a;
-			rep->ol_flags = -1;
-#endif
-			assert(rep->buf_len == seg->buf_len);
-			assert(rep->buf_len == rxq->mb_len);
-			/* Reconfigure sge to use rep instead of seg. */
-			assert(sge->lkey == rxq->mr->lkey);
-			sge->addr = ((uintptr_t)rep->buf_addr + seg_headroom);
-			elt->bufs[j] = rep;
-			++j;
-			/* Update pkt_buf if it's the first segment, or link
-			 * seg to the previous one and update pkt_buf_next. */
-			*pkt_buf_next = seg;
-			pkt_buf_next = &NEXT(seg);
-			/* Update seg information. */
-			seg_tailroom = (seg->buf_len - seg_headroom);
-			assert(sge->length == seg_tailroom);
-			SET_DATA_OFF(seg, seg_headroom);
-			if (likely(len <= seg_tailroom)) {
-				/* Last segment. */
-				DATA_LEN(seg) = len;
-				PKT_LEN(seg) = len;
-				/* Sanity check. */
-				assert(rte_pktmbuf_headroom(seg) ==
-				       seg_headroom);
-				assert(rte_pktmbuf_tailroom(seg) ==
-				       (seg_tailroom - len));
-				break;
-			}
-			DATA_LEN(seg) = seg_tailroom;
-			PKT_LEN(seg) = seg_tailroom;
-			/* Sanity check. */
-			assert(rte_pktmbuf_headroom(seg) == seg_headroom);
-			assert(rte_pktmbuf_tailroom(seg) == 0);
-			/* Fix len and clear headroom for next segments. */
-			len -= seg_tailroom;
-			seg_headroom = 0;
-		}
-		/* Update head and tail segments. */
-		*pkt_buf_next = NULL;
-		assert(pkt_buf != NULL);
-		assert(j != 0);
-		NB_SEGS(pkt_buf) = j;
-		PORT(pkt_buf) = rxq->port_id;
-		PKT_LEN(pkt_buf) = pkt_buf_len;
-		if (rxq->csum | rxq->csum_l2tun | rxq->vlan_strip) {
-			pkt_buf->packet_type = rxq_cq_to_pkt_type(flags);
-			pkt_buf->ol_flags = rxq_cq_to_ol_flags(rxq, flags);
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-			if (flags & IBV_EXP_CQ_RX_CVLAN_STRIPPED_V1) {
-				pkt_buf->ol_flags |= PKT_RX_VLAN_PKT;
-				pkt_buf->vlan_tci = vlan_tci;
-			}
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
-		}
-
-		/* Return packet. */
-		*(pkts++) = pkt_buf;
-		++pkts_ret;
-#ifdef MLX5_PMD_SOFT_COUNTERS
-		/* Increment bytes counter. */
-		rxq->stats.ibytes += pkt_buf_len;
-#endif
-repost:
-		ret = rxq->recv(rxq->wq, elt->sges, RTE_DIM(elt->sges));
-		if (unlikely(ret)) {
-			/* Inability to repost WRs is fatal. */
-			DEBUG("%p: recv_sg_list(): failed (ret=%d)",
-			      (void *)rxq->priv,
-			      ret);
-			abort();
-		}
-		if (++elts_head >= elts_n)
-			elts_head = 0;
-		continue;
-	}
-	if (unlikely(i == 0))
-		return 0;
-	rxq->elts_head = elts_head;
-#ifdef MLX5_PMD_SOFT_COUNTERS
-	/* Increment packets counter. */
-	rxq->stats.ipackets += pkts_ret;
-#endif
-	return pkts_ret;
-}
-
-/**
  * DPDK callback for RX.
  *
  * The following function is the same as mlx5_rx_burst_sp(), except it doesn't
@@ -890,7 +496,7 @@ uint16_t
 mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 {
 	struct rxq *rxq = (struct rxq *)dpdk_rxq;
-	struct rxq_elt (*elts)[rxq->elts_n] = rxq->elts.no_sp;
+	struct rte_mbuf *(*elts)[rxq->elts_n] = rxq->elts;
 	const unsigned int elts_n = rxq->elts_n;
 	unsigned int elts_head = rxq->elts_head;
 	struct ibv_sge sges[pkts_n];
@@ -898,30 +504,27 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	unsigned int pkts_ret = 0;
 	int ret;
 
-	if (unlikely(rxq->sp))
-		return mlx5_rx_burst_sp(dpdk_rxq, pkts, pkts_n);
 	for (i = 0; (i != pkts_n); ++i) {
-		struct rxq_elt *elt = &(*elts)[elts_head];
+		struct rte_mbuf *buf = (*elts)[elts_head];
 		unsigned int len;
-		struct rte_mbuf *seg = elt->buf;
 		struct rte_mbuf *rep;
 		uint32_t flags;
 		uint16_t vlan_tci;
+		int wcs_n;
 
 		/* Sanity checks. */
-		assert(seg != NULL);
+		assert(buf != NULL);
 		assert(elts_head < rxq->elts_n);
 		assert(rxq->elts_head < rxq->elts_n);
 		/*
 		 * Fetch initial bytes of packet descriptor into a
 		 * cacheline while allocating rep.
 		 */
-		rte_prefetch0(seg);
-		rte_prefetch0(&seg->cacheline1);
+		rte_prefetch0(buf);
+		rte_prefetch0(&buf->cacheline1);
 		ret = rxq->poll(rxq->cq, NULL, NULL, &flags, &vlan_tci);
 		if (unlikely(ret < 0)) {
 			struct ibv_wc wc;
-			int wcs_n;
 
 			DEBUG("rxq=%p, poll_length() failed (ret=%d)",
 			      (void *)rxq, ret);
@@ -946,7 +549,11 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 				++rxq->stats.idropped;
 #endif
 				/* Add SGE to array for repost. */
-				sges[i] = elt->sge;
+				sges[i] = (struct ibv_sge) {
+					.addr = rte_pktmbuf_mtod(buf, uintptr_t),
+					.length = buf->buf_len - RTE_PKTMBUF_HEADROOM,
+					.lkey = rxq->mr->lkey,
+				};
 				goto repost;
 			}
 			ret = wc.byte_len;
@@ -969,32 +576,31 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		}
 
 		/* Reconfigure sge to use rep instead of seg. */
-		elt->sge.addr = (uintptr_t)rep->buf_addr + RTE_PKTMBUF_HEADROOM;
-		assert(elt->sge.lkey == rxq->mr->lkey);
-		elt->buf = rep;
-
-		/* Add SGE to array for repost. */
-		sges[i] = elt->sge;
-
-		/* Update seg information. */
-		SET_DATA_OFF(seg, RTE_PKTMBUF_HEADROOM);
-		NB_SEGS(seg) = 1;
-		PORT(seg) = rxq->port_id;
-		NEXT(seg) = NULL;
-		PKT_LEN(seg) = len;
-		DATA_LEN(seg) = len;
+		sges[i] = (struct ibv_sge) {
+			.addr = rte_pktmbuf_mtod(rep, uintptr_t),
+			.length = rep->buf_len - RTE_PKTMBUF_HEADROOM,
+			.lkey = rxq->mr->lkey,
+		};
+		(*elts)[elts_head] = rep;
+		/* Update rep information. */
+		SET_DATA_OFF(buf, RTE_PKTMBUF_HEADROOM);
+		NB_SEGS(buf) = 1;
+		PORT(buf) = rxq->port_id;
+		NEXT(buf) = NULL;
+		PKT_LEN(buf) = len;
+		DATA_LEN(buf) = len;
 		if (rxq->csum | rxq->csum_l2tun | rxq->vlan_strip) {
-			seg->packet_type = rxq_cq_to_pkt_type(flags);
-			seg->ol_flags = rxq_cq_to_ol_flags(rxq, flags);
+			buf->packet_type = rxq_cq_to_pkt_type(flags);
+			buf->ol_flags = rxq_cq_to_ol_flags(rxq, flags);
 #ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
 			if (flags & IBV_EXP_CQ_RX_CVLAN_STRIPPED_V1) {
-				seg->ol_flags |= PKT_RX_VLAN_PKT;
-				seg->vlan_tci = vlan_tci;
+				buf->ol_flags |= PKT_RX_VLAN_PKT;
+				buf->vlan_tci = vlan_tci;
 			}
 #endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 		}
 		/* Return packet. */
-		*(pkts++) = seg;
+		*(pkts++) = buf;
 		++pkts_ret;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 		/* Increment bytes counter. */
