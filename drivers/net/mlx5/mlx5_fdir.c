@@ -217,7 +217,7 @@ priv_fdir_flow_add(struct priv *priv,
 	assert(spec_eth->size == sizeof(*spec_eth));
 
 	/* VLAN ID */
-	spec_eth->val.vlan_tag = desc->vlan_tag;
+	spec_eth->val.vlan_tag = desc->vlan_tag & mask->vlan_tci_mask;
 	spec_eth->mask.vlan_tag = mask->vlan_tci_mask;
 
 	/* Update priority */
@@ -225,13 +225,11 @@ priv_fdir_flow_add(struct priv *priv,
 
 	if (fdir_mode == RTE_FDIR_MODE_PERFECT_MAC_VLAN) {
 		/* MAC Address */
-		rte_memcpy(spec_eth->val.dst_mac,
-			   desc->mac,
-			   sizeof(spec_eth->val.dst_mac));
-		/* The mask is per byte mask */
-		for (i = 0; i < sizeof(spec_eth->mask.dst_mac); i++)
+		for (i = 0; i != RTE_DIM(spec_eth->mask.dst_mac); ++i) {
+			spec_eth->val.dst_mac[i] =
+				desc->mac[i] & mask->mac_addr_byte_mask;
 			spec_eth->mask.dst_mac[i] = mask->mac_addr_byte_mask;
-
+		}
 		goto create_flow;
 	}
 
@@ -248,8 +246,10 @@ priv_fdir_flow_add(struct priv *priv,
 		assert(spec_ipv4->type == IBV_EXP_FLOW_SPEC_IPV4);
 		assert(spec_ipv4->size == sizeof(*spec_ipv4));
 
-		spec_ipv4->val.src_ip = desc->src_ip[0];
-		spec_ipv4->val.dst_ip = desc->dst_ip[0];
+		spec_ipv4->val.src_ip =
+			desc->src_ip[0] & mask->ipv4_mask.src_ip;
+		spec_ipv4->val.dst_ip =
+			desc->dst_ip[0] & mask->ipv4_mask.dst_ip;
 		spec_ipv4->mask.src_ip = mask->ipv4_mask.src_ip;
 		spec_ipv4->mask.dst_ip = mask->ipv4_mask.dst_ip;
 
@@ -274,12 +274,12 @@ priv_fdir_flow_add(struct priv *priv,
 		assert(spec_ipv6->type == IBV_EXP_FLOW_SPEC_IPV6);
 		assert(spec_ipv6->size == sizeof(*spec_ipv6));
 
-		rte_memcpy(spec_ipv6->val.src_ip,
-			   desc->src_ip,
-			   sizeof(spec_ipv6->val.src_ip));
-		rte_memcpy(spec_ipv6->val.dst_ip,
-			   desc->dst_ip,
-			   sizeof(spec_ipv6->val.dst_ip));
+		for (i = 0; i != RTE_DIM(desc->src_ip); ++i) {
+			((uint32_t *)spec_ipv6->val.src_ip)[i] =
+				desc->src_ip[i] & mask->ipv6_mask.src_ip[i];
+			((uint32_t *)spec_ipv6->val.dst_ip)[i] =
+				desc->dst_ip[i] & mask->ipv6_mask.dst_ip[i];
+		}
 		rte_memcpy(spec_ipv6->mask.src_ip,
 			   mask->ipv6_mask.src_ip,
 			   sizeof(spec_ipv6->mask.src_ip));
@@ -309,8 +309,8 @@ priv_fdir_flow_add(struct priv *priv,
 	       spec_tcp_udp->type == IBV_EXP_FLOW_SPEC_UDP);
 	assert(spec_tcp_udp->size == sizeof(*spec_tcp_udp));
 
-	spec_tcp_udp->val.src_port = desc->src_port;
-	spec_tcp_udp->val.dst_port = desc->dst_port;
+	spec_tcp_udp->val.src_port = desc->src_port & mask->src_port_mask;
+	spec_tcp_udp->val.dst_port = desc->dst_port & mask->dst_port_mask;
 	spec_tcp_udp->mask.src_port = mask->src_port_mask;
 	spec_tcp_udp->mask.dst_port = mask->dst_port_mask;
 
