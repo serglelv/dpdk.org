@@ -168,6 +168,68 @@ fdir_filter_to_flow_desc(const struct rte_eth_fdir_filter *fdir_filter,
 }
 
 /**
+ * Check if two flow descriptors overlap according to configured mask.
+ *
+ * @param priv
+ *   Private structure that provides flow director mask.
+ * @param desc1
+ *   First flow descriptor to compare.
+ * @param desc2
+ *   Second flow descriptor to compare.
+ *
+ * @return
+ *   Nonzero if descriptors overlap.
+ */
+static int
+priv_fdir_overlap(const struct priv *priv,
+		  const struct fdir_flow_desc *desc1,
+		  const struct fdir_flow_desc *desc2)
+{
+	const struct rte_eth_fdir_masks *mask =
+		&priv->dev->data->dev_conf.fdir_conf.mask;
+	unsigned int i;
+
+	if (desc1->type != desc2->type)
+		return 0;
+	/* Ignore non masked bits. */
+	for (i = 0; i != RTE_DIM(desc1->mac); ++i)
+		if ((desc1->mac[i] & mask->mac_addr_byte_mask) !=
+		    (desc2->mac[i] & mask->mac_addr_byte_mask))
+			return 0;
+	if (((desc1->src_port & mask->src_port_mask) !=
+	     (desc2->src_port & mask->src_port_mask)) ||
+	    ((desc1->dst_port & mask->dst_port_mask) !=
+	     (desc2->dst_port & mask->dst_port_mask)))
+		return 0;
+	switch (desc1->type) {
+	case HASH_RXQ_IPV4:
+	case HASH_RXQ_UDPV4:
+	case HASH_RXQ_TCPV4:
+		if (((desc1->src_ip[0] & mask->ipv4_mask.src_ip) !=
+		     (desc2->src_ip[0] & mask->ipv4_mask.src_ip)) ||
+		    ((desc1->dst_ip[0] & mask->ipv4_mask.dst_ip) !=
+		     (desc2->dst_ip[0] & mask->ipv4_mask.dst_ip)))
+			return 0;
+		break;
+#ifdef HAVE_FLOW_SPEC_IPV6
+	case HASH_RXQ_IPV6:
+	case HASH_RXQ_UDPV6:
+	case HASH_RXQ_TCPV6:
+		for (i = 0; i != RTE_DIM(desc1->src_ip); ++i)
+			if (((desc1->src_ip[i] & mask->ipv6_mask.src_ip[i]) !=
+			     (desc2->src_ip[i] & mask->ipv6_mask.src_ip[i])) ||
+			    ((desc1->dst_ip[i] & mask->ipv6_mask.dst_ip[i]) !=
+			     (desc2->dst_ip[i] & mask->ipv6_mask.dst_ip[i])))
+				return 0;
+		break;
+#endif /* HAVE_FLOW_SPEC_IPV6 */
+	default:
+		break;
+	}
+	return 1;
+}
+
+/**
  * Create flow director steering rule for a specific filter.
  *
  * @param priv
@@ -200,7 +262,18 @@ priv_fdir_flow_add(struct priv *priv,
 	struct ibv_exp_flow_spec_ipv6 *spec_ipv6;
 #endif /* HAVE_FLOW_SPEC_IPV6 */
 	struct ibv_exp_flow_spec_tcp_udp *spec_tcp_udp;
+	struct mlx5_fdir_filter *iter_fdir_filter;
 	unsigned int i;
+
+	/* Abort if an existing flow overlaps this one to avoid packet
+	 * duplication, even if it targets another queue. */
+	LIST_FOREACH(iter_fdir_filter, priv->fdir_filter_list, next)
+		if ((iter_fdir_filter != mlx5_fdir_filter) &&
+		    (iter_fdir_filter->flow != NULL) &&
+		    (priv_fdir_overlap(priv,
+				       &mlx5_fdir_filter->desc,
+				       &iter_fdir_filter->desc)))
+			return EEXIST;
 
 	/*
 	 * No padding must be inserted by the compiler between attr and spec.
