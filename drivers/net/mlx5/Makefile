@@ -121,11 +121,6 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		enum IBV_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR \
 		$(AUTOCONF_OUTPUT)
 	$Q sh -- '$<' '$@' \
-		HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS \
-		infiniband/verbs.h \
-		enum IBV_EXP_DEVICE_ATTR_VLAN_OFFLOADS \
-		$(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
 		HAVE_EXP_CQ_RX_TCP_PACKET \
 		infiniband/verbs.h \
 		enum IBV_EXP_CQ_RX_TCP_PACKET \

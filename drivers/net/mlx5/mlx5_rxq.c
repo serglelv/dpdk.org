@@ -243,12 +243,7 @@ priv_flow_attr(struct priv *priv, struct ibv_exp_flow_attr *flow_attr,
 	init = &hash_rxq_init[type];
 	*flow_attr = (struct ibv_exp_flow_attr){
 		.type = IBV_EXP_FLOW_ATTR_NORMAL,
-#ifdef MLX5_FDIR_SUPPORT
-		/* Priorities < 3 are reserved for flow director. */
-		.priority = init->flow_priority + 3,
-#else /* MLX5_FDIR_SUPPORT */
 		.priority = init->flow_priority,
-#endif /* MLX5_FDIR_SUPPORT */
 		.num_of_specs = 0,
 		.port = priv->port,
 		.flags = 0,
@@ -989,7 +984,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	DEBUG("priv->device_attr.max_sge is %d",
 	      priv->device_attr.max_sge);
 	/* Configure VLAN stripping. */
-	tmpl.vlan_strip = dev->data->dev_conf.rxmode.hw_vlan_strip;
 	attr.wq = (struct ibv_exp_wq_init_attr){
 		.wq_context = NULL, /* Could be useful in the future. */
 		.wq_type = IBV_EXP_WQT_RQ,
@@ -1003,16 +997,8 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		.cq = tmpl.cq,
 		.comp_mask =
 			IBV_EXP_CREATE_WQ_RES_DOMAIN |
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-			IBV_EXP_CREATE_WQ_VLAN_OFFLOADS |
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 			0,
 		.res_domain = tmpl.rd,
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-		.vlan_offloads = (tmpl.vlan_strip ?
-				  IBV_EXP_RECEIVE_WQ_CVLAN_STRIP :
-				  0),
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 	};
 
 #ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING
@@ -1051,9 +1037,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	DEBUG("%p: RTE port ID: %u", (void *)rxq, tmpl.port_id);
 	attr.params = (struct ibv_exp_query_intf_params){
 		.intf_scope = IBV_EXP_INTF_GLOBAL,
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-		.intf_version = 1,
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 		.intf = IBV_EXP_INTF_CQ,
 		.obj = tmpl.cq,
 	};
@@ -1114,11 +1097,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	DEBUG("%p: rxq updated with %p", (void *)rxq, (void *)&tmpl);
 	assert(ret == 0);
 	/* Assign function in queue. */
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-	rxq->poll = rxq->if_cq->poll_length_flags_cvlan;
-#else /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 	rxq->poll = rxq->if_cq->poll_length_flags;
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 	rxq->recv = rxq->if_wq->recv_burst;
 	return 0;
 error:

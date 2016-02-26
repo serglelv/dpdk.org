@@ -100,7 +100,6 @@ struct rxq {
 	unsigned int port_id; /* Port ID for incoming packets. */
 	unsigned int elts_n; /* (*elts)[] length. */
 	unsigned int elts_head; /* Current index in (*elts)[]. */
-	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
 	struct rte_mbuf *(*elts)[]; /* RX elements. */
 	uint32_t mb_len; /* Length of a mp-issued mbuf. */
 	unsigned int socket; /* CPU socket ID for allocations. */
@@ -109,11 +108,7 @@ struct rxq {
 	struct fdir_queue fdir_queue; /* Flow director queue. */
 	struct ibv_mr *mr; /* Memory Region (for mp). */
 	struct ibv_exp_wq_family *if_wq; /* WQ burst interface. */
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-	struct ibv_exp_cq_family_v1 *if_cq; /* CQ interface. */
-#else /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 	struct ibv_exp_cq_family *if_cq; /* CQ interface. */
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 };
 
 /* Hash RX queue types. */

@@ -230,8 +230,6 @@ void mlx5_stats_reset(struct rte_eth_dev *);
 /* mlx5_vlan.c */
 
 int mlx5_vlan_filter_set(struct rte_eth_dev *, uint16_t, int);
-void mlx5_vlan_offload_set(struct rte_eth_dev *, int);
-void mlx5_vlan_strip_queue_set(struct rte_eth_dev *, uint16_t, int);
 
 /* mlx5_trigger.c */
 
@@ -244,7 +242,5 @@ int fdir_init_filters_list(struct priv *);
 void priv_fdir_delete_filters_list(struct priv *);
 void priv_fdir_disable(struct priv *);
 void priv_fdir_enable(struct priv *);
-int mlx5_dev_filter_ctrl(struct rte_eth_dev *, enum rte_filter_type,
-			 enum rte_filter_op, void *);
 
 #endif /* RTE_PMD_MLX5_H_ */
