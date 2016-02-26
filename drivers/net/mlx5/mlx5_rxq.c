@@ -949,11 +949,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		rte_pktmbuf_tailroom(buf)) == tmpl.mb_len);
 	assert(rte_pktmbuf_headroom(buf) == RTE_PKTMBUF_HEADROOM);
 	rte_pktmbuf_free(buf);
-	/* Toggle RX checksum offload if hardware supports it. */
-	if (priv->hw_csum)
-		tmpl.csum = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
-	if (priv->hw_csum_l2tun)
-		tmpl.csum_l2tun = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
 	DEBUG("%p: %s scattered packets support (%u WRs)",
 	      (void *)dev, "disabling", desc);
 	/* Use the entire RX mempool as the memory region. */

@@ -373,56 +373,6 @@ rxq_cq_to_pkt_type(uint32_t flags)
 }
 
 /**
- * Translate RX completion flags to offload flags.
- *
- * @param[in] rxq
- *   Pointer to RX queue structure.
- * @param flags
- *   RX completion flags returned by poll_length_flags().
- *
- * @return
- *   Offload flags (ol_flags) for struct rte_mbuf.
- */
-static inline uint32_t
-rxq_cq_to_ol_flags(const struct rxq *rxq, uint32_t flags)
-{
-	uint32_t ol_flags = 0;
-
-	if (rxq->csum) {
-		/* Set IP checksum flag only for IPv4/IPv6 packets. */
-		if (flags &
-		    (IBV_EXP_CQ_RX_IPV4_PACKET | IBV_EXP_CQ_RX_IPV6_PACKET))
-			ol_flags |=
-				TRANSPOSE(~flags,
-					IBV_EXP_CQ_RX_IP_CSUM_OK,
-					PKT_RX_IP_CKSUM_BAD);
-#ifdef HAVE_EXP_CQ_RX_TCP_PACKET
-		/* Set L4 checksum flag only for TCP/UDP packets. */
-		if (flags &
-		    (IBV_EXP_CQ_RX_TCP_PACKET | IBV_EXP_CQ_RX_UDP_PACKET))
-#endif /* HAVE_EXP_CQ_RX_TCP_PACKET */
-			ol_flags |=
-				TRANSPOSE(~flags,
-					IBV_EXP_CQ_RX_TCP_UDP_CSUM_OK,
-					PKT_RX_L4_CKSUM_BAD);
-	}
-	/*
-	 * PKT_RX_IP_CKSUM_BAD and PKT_RX_L4_CKSUM_BAD are used in place
-	 * of PKT_RX_EIP_CKSUM_BAD because the latter is not functional
-	 * (its value is 0).
-	 */
-	if ((flags & IBV_EXP_CQ_RX_TUNNEL_PACKET) && (rxq->csum_l2tun))
-		ol_flags |=
-			TRANSPOSE(~flags,
-				  IBV_EXP_CQ_RX_OUTER_IP_CSUM_OK,
-				  PKT_RX_IP_CKSUM_BAD) |
-			TRANSPOSE(~flags,
-				  IBV_EXP_CQ_RX_OUTER_TCP_UDP_CSUM_OK,
-				  PKT_RX_L4_CKSUM_BAD);
-	return ol_flags;
-}
-
-/**
  * DPDK callback for RX.
  *
  * The following function is the same as mlx5_rx_burst_sp(), except it doesn't
@@ -536,16 +486,6 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		NEXT(buf) = NULL;
 		PKT_LEN(buf) = len;
 		DATA_LEN(buf) = len;
-		if (rxq->csum | rxq->csum_l2tun | rxq->vlan_strip) {
-			buf->packet_type = rxq_cq_to_pkt_type(flags);
-			buf->ol_flags = rxq_cq_to_ol_flags(rxq, flags);
-#ifdef HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS
-			if (flags & IBV_EXP_CQ_RX_CVLAN_STRIPPED_V1) {
-				buf->ol_flags |= PKT_RX_VLAN_PKT;
-				buf->vlan_tci = vlan_tci;
-			}
-#endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
-		}
 		/* Return packet. */
 		*(pkts++) = buf;
 		++pkts_ret;

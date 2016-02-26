@@ -100,8 +100,6 @@ struct rxq {
 	unsigned int port_id; /* Port ID for incoming packets. */
 	unsigned int elts_n; /* (*elts)[] length. */
 	unsigned int elts_head; /* Current index in (*elts)[]. */
-	unsigned int csum:1; /* Enable checksum offloading. */
-	unsigned int csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
 	struct rte_mbuf *(*elts)[]; /* RX elements. */
 	uint32_t mb_len; /* Length of a mp-issued mbuf. */
