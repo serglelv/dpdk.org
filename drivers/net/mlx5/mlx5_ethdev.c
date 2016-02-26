@@ -1068,7 +1068,9 @@ mlx5_secondary_data_setup(struct priv *priv)
 	priv_lock(priv);
 	/* TX queues. */
 	for (i = 0; i != nb_tx_queues; ++i) {
-		struct txq *primary_txq = (*sd->primary_priv->txqs)[i];
+		struct txq *primary_txq =
+			container_of((*sd->primary_priv->txqs)[i], struct txq,
+				     ftxq);
 		struct txq *txq;
 
 		if (primary_txq == NULL)
@@ -1078,10 +1080,10 @@ mlx5_secondary_data_setup(struct priv *priv)
 		if (txq != NULL) {
 			if (txq_setup(priv->dev,
 				      txq,
-				      primary_txq->elts_n,
+				      primary_txq->ftxq.elts_n,
 				      primary_txq->socket,
 				      NULL) == 0) {
-				txq->stats.idx = primary_txq->stats.idx;
+				txq->ftxq.stats.idx = primary_txq->ftxq.stats.idx;
 				tx_queues[i] = txq;
 				continue;
 			}
@@ -1096,7 +1098,9 @@ mlx5_secondary_data_setup(struct priv *priv)
 	}
 	/* RX queues. */
 	for (i = 0; i != nb_rx_queues; ++i) {
-		struct rxq *primary_rxq = (*sd->primary_priv->rxqs)[i];
+		struct rxq *primary_rxq =
+			container_of((*sd->primary_priv->rxqs)[i], struct rxq,
+				     frxq);
 
 		if (primary_rxq == NULL)
 			continue;

@@ -43,6 +43,8 @@
 #pragma GCC diagnostic ignored "-pedantic"
 #endif
 #include <infiniband/verbs.h>
+#include <infiniband/arch.h>
+#include <infiniband/mlx5_hw.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -380,8 +382,13 @@ priv_create_hash_rxqs(struct priv *priv)
 		DEBUG("indirection table extended to assume %u WQs",
 		      priv->reta_idx_n);
 	}
-	for (i = 0; (i != priv->reta_idx_n); ++i)
-		wqs[i] = (*priv->rxqs)[(*priv->reta_idx)[i]]->wq;
+	for (i = 0; (i != priv->reta_idx_n); ++i) {
+		struct rxq *rxq;
+
+		rxq = container_of((*priv->rxqs)[(*priv->reta_idx)[i]],
+				   struct rxq, frxq);
+		wqs[i] = rxq->wq;
+	}
 	/* Get number of hash RX queues to configure. */
 	for (i = 0, hash_rxqs_n = 0; (i != ind_tables_n); ++i)
 		hash_rxqs_n += ind_table_init[i].hash_types_n;
@@ -644,51 +651,56 @@ static int
 rxq_alloc_elts(struct rxq *rxq, unsigned int elts_n, struct rte_mbuf **pool)
 {
 	unsigned int i;
-	struct rte_mbuf *(*elts)[elts_n] =
-		rte_calloc_socket("RXQ elements", 1, sizeof(*elts), 0,
-				  rxq->socket);
 	int ret = 0;
 
-	if (elts == NULL) {
-		ERROR("%p: can't allocate packets array", (void *)rxq);
-		ret = ENOMEM;
-		goto error;
-	}
 	/* For each WR (packet). */
 	for (i = 0; (i != elts_n); ++i) {
+		struct rte_mbuf *buf;
+		volatile struct mlx5_wqe_data_seg *scat = &(*rxq->frxq.wqes)[i];
+
 		if (pool != NULL) {
-			(*elts)[i] = *(pool++);
-			assert((*elts)[i] != NULL);
-			rte_pktmbuf_reset((*elts)[i]);
+			buf = *(pool++);
+			assert(buf != NULL);
+			rte_pktmbuf_reset(buf);
 		} else
-			(*elts)[i] = rte_pktmbuf_alloc(rxq->mp);
-		if ((*elts)[i] == NULL) {
+			buf = rte_pktmbuf_alloc(rxq->frxq.mp);
+		if (buf == NULL) {
 			assert(pool == NULL);
 			ERROR("%p: empty mbuf pool", (void *)rxq);
 			ret = ENOMEM;
 			goto error;
 		}
 		/* Headroom is reserved by rte_pktmbuf_alloc(). */
-		assert(DATA_OFF((*elts)[i]) == RTE_PKTMBUF_HEADROOM);
+		assert(DATA_OFF(buf) == RTE_PKTMBUF_HEADROOM);
 		/* Buffer is supposed to be empty. */
-		assert(rte_pktmbuf_data_len((*elts)[i]) == 0);
-		assert(rte_pktmbuf_pkt_len((*elts)[i]) == 0);
+		assert(rte_pktmbuf_data_len(buf) == 0);
+		assert(rte_pktmbuf_pkt_len(buf) == 0);
+		/* sge->addr must be able to store a pointer. */
+		assert(sizeof(scat->addr) >= sizeof(uintptr_t));
+		/* SGE keeps its headroom. */
+		/* Reconfigure sge to use rep instead of seg. */
+		(*rxq->frxq.elts)[i] = buf;
+		scat->addr = htonll((uintptr_t)buf->buf_addr + RTE_PKTMBUF_HEADROOM);
+		scat->byte_count = htonl(buf->buf_len - RTE_PKTMBUF_HEADROOM);
+		scat->lkey = htonl(rxq->mr->lkey);
+		/* Redundant check for tailroom. */
+		assert(scat->byte_count == htonl(rte_pktmbuf_tailroom(buf)));
 	}
-	rxq->elts_n = elts_n;
-	rxq->elts_head = 0;
-	rxq->elts = elts;
+	DEBUG("%p: allocated and configured %u single-segment WRs",
+	      (void *)rxq, elts_n);
 	assert(ret == 0);
+
+	rxq->frxq.rq_ci = i;
+	rte_wmb();
+	*rxq->frxq.rq_db = htonl(rxq->frxq.rq_ci);
 	return 0;
 error:
-	if (elts != NULL) {
-		assert(pool == NULL);
-		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
-			struct rte_mbuf *buf = (*elts)[i];
-
-			if (buf != NULL)
-				rte_pktmbuf_free_seg(buf);
-		}
-		rte_free(elts);
+	assert(pool == NULL);
+	elts_n = i;
+	for (i = 0; (i != elts_n); ++i) {
+		if ((*rxq->frxq.elts)[i] != NULL)
+			rte_pktmbuf_free_seg((*rxq->frxq.elts)[i]);
+		(*rxq->frxq.elts)[i] = NULL;
 	}
 	DEBUG("%p: failed, freed everything", (void *)rxq);
 	assert(ret > 0);
@@ -705,21 +717,16 @@ static void
 rxq_free_elts(struct rxq *rxq)
 {
 	unsigned int i;
-	unsigned int elts_n = rxq->elts_n;
-	struct rte_mbuf *(*elts)[elts_n] = rxq->elts;
 
 	DEBUG("%p: freeing WRs", (void *)rxq);
-	rxq->elts_n = 0;
-	rxq->elts = NULL;
-	if (elts == NULL)
+	if (rxq->frxq.elts == NULL)
 		return;
-	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
-		struct rte_mbuf *buf = (*elts)[i];
 
-		if (buf != NULL)
-			rte_pktmbuf_free_seg(buf);
+	for (i = 0; (i != rxq->frxq.elts_n); ++i) {
+		if ((*rxq->frxq.elts)[i] != NULL)
+			rte_pktmbuf_free_seg((*rxq->frxq.elts)[i]);
+		(*rxq->frxq.elts)[i] = NULL;
 	}
-	rte_free(elts);
 }
 
 /**
@@ -737,8 +744,6 @@ rxq_cleanup(struct rxq *rxq)
 
 	DEBUG("cleaning up %p", (void *)rxq);
 	rxq_free_elts(rxq);
-	rxq->poll = NULL;
-	rxq->recv = NULL;
 	if (rxq->if_wq != NULL) {
 		assert(rxq->priv != NULL);
 		assert(rxq->priv->ctx != NULL);
@@ -805,12 +810,11 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	struct rte_mbuf **pool;
 	unsigned int i, k;
 	struct ibv_exp_wq_attr mod;
-	struct rte_mbuf *(*elts)[rxq->elts_n] = rxq->elts;
 	int err;
 
 	DEBUG("%p: rehashing queue %p", (void *)dev, (void *)rxq);
 	/* Number of descriptors and mbufs currently allocated. */
-	desc_n = tmpl.elts_n;
+	desc_n = tmpl.frxq.elts_n;
 	mbuf_n = desc_n;
 	/* From now on, any failure will render the queue unusable.
 	 * Reinitialize WQ. */
@@ -832,23 +836,10 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	}
 	/* Snatch mbufs from original queue. */
 	k = 0;
-
-	for (i = 0; (i != RTE_DIM(*elts)); ++i)
-		pool[k++] = (*elts)[i];
+	for (i = 0; (i != desc_n); ++i)
+		pool[k++] = (*rxq->frxq.elts)[i];
 	assert(k == mbuf_n);
-	tmpl.elts_n = 0;
-	err = rxq_alloc_elts(&tmpl, desc_n, pool);
-	if (err) {
-		ERROR("%p: cannot reallocate WRs, aborting", (void *)dev);
-		rte_free(pool);
-		assert(err > 0);
-		return err;
-	}
-	assert(tmpl.elts_n == desc_n);
 	rte_free(pool);
-	/* Clean up original data. */
-	rxq->elts_n = 0;
-	rte_free(rxq->elts);
 	/* Change queue state to ready. */
 	mod = (struct ibv_exp_wq_attr){
 		.attr_mask = IBV_EXP_WQ_ATTR_STATE,
@@ -861,32 +852,45 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		goto error;
 	}
 	/* Post SGEs. */
-	assert(tmpl.if_wq != NULL);
-	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
-		struct rte_mbuf *buf = (*elts)[i];
-		struct ibv_sge sge = {
-			.addr = (uintptr_t)((uint8_t *)buf->buf_addr +
-					    RTE_PKTMBUF_HEADROOM),
-			.length = buf->buf_len - RTE_PKTMBUF_HEADROOM,
-			.lkey = rxq->mr->lkey,
-		};
-
-		err = tmpl.if_wq->recv_burst(tmpl.wq, &sge, 1);
-		if (err)
-			break;
-	}
+	err = rxq_alloc_elts(&tmpl, desc_n, pool);
 	if (err) {
-		ERROR("%p: failed to post SGEs with error %d",
-		      (void *)dev, err);
-		/* Set err because it does not contain a valid errno value. */
-		err = EIO;
-		goto error;
+		ERROR("%p: cannot reallocate WRs, aborting", (void *)dev);
+		rte_free(pool);
+		assert(err > 0);
+		return err;
 	}
-	tmpl.recv = tmpl.if_wq->recv_burst;
 error:
 	*rxq = tmpl;
 	assert(err >= 0);
 	return err;
+}
+
+/**
+ *  Initialise fast receive queue elements.
+ *
+ * @param rxq
+ *   Pointer to the receive queue.
+ */
+static inline void
+rxq_frxq_setup(struct rxq *tmpl, struct rxq *rxq)
+{
+	struct ibv_cq *ibcq = tmpl->cq;
+	struct mlx5_cq *cq = to_mxxx(cq, cq);
+	struct mlx5_rwq *rwq = container_of(tmpl->wq, struct mlx5_rwq, wq);
+
+	tmpl->frxq.rq_db = rwq->rq.db;
+	tmpl->frxq.cq_ci = 0;
+	tmpl->frxq.rq_ci = 0;
+	tmpl->frxq.cq_db = cq->dbrec;
+	tmpl->frxq.wqes =
+		(volatile struct mlx5_wqe_data_seg (*)[])
+		(uintptr_t)rwq->rq.buff;
+	tmpl->frxq.cqes =
+		(volatile struct mlx5_cqe64 (*)[])
+		(uintptr_t)cq->active_buf->buf;
+	tmpl->frxq.elts =
+		(struct rte_mbuf *(*)[tmpl->frxq.elts_n])
+		((uintptr_t)rxq + sizeof(*rxq));
 }
 
 /**
@@ -916,7 +920,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	struct priv *priv = dev->data->dev_private;
 	struct rxq tmpl = {
 		.priv = priv,
-		.mp = mp,
 		.socket = socket
 	};
 	struct ibv_exp_wq_attr mod;
@@ -925,29 +928,25 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		struct ibv_exp_cq_init_attr cq;
 		struct ibv_exp_res_domain_init_attr rd;
 		struct ibv_exp_wq_init_attr wq;
+		struct ibv_exp_cq_attr cq_attr;
 	} attr;
 	enum ibv_exp_query_intf_status status;
-	struct rte_mbuf *buf;
 	int ret = 0;
-	unsigned int i;
-	unsigned int cq_size = desc;
 
 	(void)conf; /* Thresholds configuration (ignored). */
-	/* Get mbuf length. */
-	buf = rte_pktmbuf_alloc(mp);
-	if (buf == NULL) {
-		ERROR("%p: unable to allocate mbuf", (void *)dev);
-		return ENOMEM;
+	if (desc == 0) {
+		ERROR("%p: invalid number of RX descriptors (must be a"
+		      " multiple of 2)", (void *)dev);
+		return EINVAL;
 	}
-	tmpl.mb_len = buf->buf_len;
-	assert((rte_pktmbuf_headroom(buf) +
-		rte_pktmbuf_tailroom(buf)) == tmpl.mb_len);
-	assert(rte_pktmbuf_headroom(buf) == RTE_PKTMBUF_HEADROOM);
-	rte_pktmbuf_free(buf);
-	DEBUG("%p: %s scattered packets support (%u WRs)",
-	      (void *)dev, "disabling", desc);
+	tmpl.frxq.elts_n = desc;
 	/* Use the entire RX mempool as the memory region. */
-	tmpl.mr = mlx5_mp2mr(priv->pd, mp);
+	tmpl.mr = ibv_reg_mr(priv->pd,
+			     (void *)mp->elt_va_start,
+			     (mp->elt_va_end - mp->elt_va_start),
+			     (IBV_ACCESS_LOCAL_WRITE |
+			      IBV_ACCESS_REMOTE_WRITE));
+	tmpl.frxq.mp = mp;
 	if (tmpl.mr == NULL) {
 		ret = EINVAL;
 		ERROR("%p: MR creation failure: %s",
@@ -971,11 +970,22 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
 		.res_domain = tmpl.rd,
 	};
-	tmpl.cq = ibv_exp_create_cq(priv->ctx, cq_size, NULL, NULL, 0,
+	tmpl.cq = ibv_exp_create_cq(priv->ctx, desc - 1, NULL, NULL, 0,
 				    &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
 		ERROR("%p: CQ creation failure: %s",
+		      (void *)dev, strerror(ret));
+		goto error;
+	};
+	attr.cq_attr = (struct ibv_exp_cq_attr) {
+		.comp_mask = IBV_EXP_CQ_ATTR_CQ_CAP_FLAGS,
+		.cq_cap_flags = IBV_EXP_CQ_IGNORE_OVERRUN,
+	};
+	ret = ibv_exp_modify_cq(tmpl.cq, &attr.cq_attr, IBV_EXP_CQ_CAP_FLAGS);
+	if (ret) {
+		ret = ENOSYS;
+		ERROR("%p: CQ modification failure: %s",
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
@@ -983,14 +993,13 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	      priv->device_attr.max_qp_wr);
 	DEBUG("priv->device_attr.max_sge is %d",
 	      priv->device_attr.max_sge);
-	/* Configure VLAN stripping. */
 	attr.wq = (struct ibv_exp_wq_init_attr){
 		.wq_context = NULL, /* Could be useful in the future. */
 		.wq_type = IBV_EXP_WQT_RQ,
 		/* Max number of outstanding WRs. */
-		.max_recv_wr = ((priv->device_attr.max_qp_wr < (int)cq_size) ?
+		.max_recv_wr = ((priv->device_attr.max_qp_wr < (int)desc) ?
 				priv->device_attr.max_qp_wr :
-				(int)cq_size),
+				(int)desc),
 		/* Max number of scatter/gather elements in a WR. */
 		.max_recv_sge = 1,
 		.pd = priv->pd,
@@ -1026,15 +1035,9 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	ret = rxq_alloc_elts(&tmpl, desc, NULL);
-	if (ret) {
-		ERROR("%p: RXQ allocation failed: %s",
-		      (void *)dev, strerror(ret));
-		goto error;
-	}
 	/* Save port ID. */
-	tmpl.port_id = dev->data->port_id;
-	DEBUG("%p: RTE port ID: %u", (void *)rxq, tmpl.port_id);
+	tmpl.frxq.port_id = dev->data->port_id;
+	DEBUG("%p: RTE port ID: %u", (void *)rxq, tmpl.frxq.port_id);
 	attr.params = (struct ibv_exp_query_intf_params){
 		.intf_scope = IBV_EXP_INTF_GLOBAL,
 		.intf = IBV_EXP_INTF_CQ,
@@ -1068,26 +1071,11 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	/* Post SGEs. */
-	for (i = 0; (i != desc); ++i) {
-		struct ibv_sge sge;
-
-		buf = (*tmpl.elts)[i];
-		sge = (struct ibv_sge) {
-			.addr = rte_pktmbuf_mtod(buf, uintptr_t),
-			.length = buf->buf_len - RTE_PKTMBUF_HEADROOM,
-			.lkey = tmpl.mr->lkey,
-		};
-
-		ret = tmpl.if_wq->recv_burst(tmpl.wq, &sge, 1);
-		if (ret)
-			break;
-	}
+	rxq_frxq_setup(&tmpl, rxq);
+	ret = rxq_alloc_elts(&tmpl, desc, NULL);
 	if (ret) {
-		ERROR("%p: failed to post SGEs with error %d",
-		      (void *)dev, ret);
-		/* Set ret because it does not contain a valid errno value. */
-		ret = EIO;
+		ERROR("%p: RXQ allocation failed: %s",
+		      (void *)dev, strerror(ret));
 		goto error;
 	}
 	/* Clean up rxq in case we're reinitializing it. */
@@ -1097,8 +1085,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	DEBUG("%p: rxq updated with %p", (void *)rxq, (void *)&tmpl);
 	assert(ret == 0);
 	/* Assign function in queue. */
-	rxq->poll = rxq->if_cq->poll_length_flags;
-	rxq->recv = rxq->if_wq->recv_burst;
 	return 0;
 error:
 	rxq_cleanup(&tmpl);
@@ -1131,13 +1117,23 @@ mlx5_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		    struct rte_mempool *mp)
 {
 	struct priv *priv = dev->data->dev_private;
-	struct rxq *rxq = (*priv->rxqs)[idx];
+	struct frxq *frxq = (*priv->rxqs)[idx];
+	struct rxq *rxq = NULL;
 	int ret;
 
+	if (frxq)
+		rxq = container_of(frxq, struct rxq, frxq);
 	if (mlx5_is_secondary())
 		return -E_RTE_SECONDARY;
 
 	priv_lock(priv);
+	if (desc & (desc - 1)) {
+		desc = 1 << log2above(desc - 1);
+		WARN("%p: increased number of descriptor in RX queue %u"
+		     " to the next power of two value (%d)",
+		     (void *)dev, idx, desc);
+	}
+
 	DEBUG("%p: configuring queue %u for %u descriptors",
 	      (void *)dev, idx, desc);
 	if (idx >= priv->rxqs_n) {
@@ -1156,7 +1152,9 @@ mlx5_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		(*priv->rxqs)[idx] = NULL;
 		rxq_cleanup(rxq);
 	} else {
-		rxq = rte_calloc_socket("RXQ", 1, sizeof(*rxq), 0, socket);
+		rxq = rte_calloc_socket(
+				"RXQ", 1, sizeof(*rxq) +
+				desc * sizeof(struct rte_mbuf *), 0, socket);
 		if (rxq == NULL) {
 			ERROR("%p: unable to allocate queue index %u",
 			      (void *)dev, idx);
@@ -1171,7 +1169,7 @@ mlx5_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		rxq->stats.idx = idx;
 		DEBUG("%p: adding RX queue %p to list",
 		      (void *)dev, (void *)rxq);
-		(*priv->rxqs)[idx] = rxq;
+		(*priv->rxqs)[idx] = &rxq->frxq;
 		/* Update receive callback. */
 		dev->rx_pkt_burst = mlx5_rx_burst;
 	}
@@ -1188,7 +1186,8 @@ mlx5_rx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 void
 mlx5_rx_queue_release(void *dpdk_rxq)
 {
-	struct rxq *rxq = (struct rxq *)dpdk_rxq;
+	struct frxq *frxq = (struct frxq *)dpdk_rxq;
+	struct rxq *rxq = container_of(frxq, struct rxq, frxq);
 	struct priv *priv;
 	unsigned int i;
 
@@ -1200,7 +1199,7 @@ mlx5_rx_queue_release(void *dpdk_rxq)
 	priv = rxq->priv;
 	priv_lock(priv);
 	for (i = 0; (i != priv->rxqs_n); ++i)
-		if ((*priv->rxqs)[i] == rxq) {
+		if ((*priv->rxqs)[i] == frxq) {
 			DEBUG("%p: removing RX queue %p from list",
 			      (void *)priv->dev, (void *)rxq);
 			(*priv->rxqs)[i] = NULL;
@@ -1231,7 +1230,8 @@ uint16_t
 mlx5_rx_burst_secondary_setup(void *dpdk_rxq, struct rte_mbuf **pkts,
 			      uint16_t pkts_n)
 {
-	struct rxq *rxq = dpdk_rxq;
+	struct frxq *frxq = dpdk_rxq;
+	struct rxq *rxq = container_of(frxq, struct rxq, frxq);
 	struct priv *priv = mlx5_secondary_data_setup(rxq->priv);
 	struct priv *primary_priv;
 	unsigned int index;
@@ -1242,11 +1242,11 @@ mlx5_rx_burst_secondary_setup(void *dpdk_rxq, struct rte_mbuf **pkts,
 		mlx5_secondary_data[priv->dev->data->port_id].primary_priv;
 	/* Look for queue index in both private structures. */
 	for (index = 0; index != priv->rxqs_n; ++index)
-		if (((*primary_priv->rxqs)[index] == rxq) ||
-		    ((*priv->rxqs)[index] == rxq))
+		if (((*primary_priv->rxqs)[index] == frxq) ||
+		    ((*priv->rxqs)[index] == frxq))
 			break;
 	if (index == priv->rxqs_n)
 		return 0;
-	rxq = (*priv->rxqs)[index];
-	return priv->dev->rx_pkt_burst(rxq, pkts, pkts_n);
+	frxq = (*priv->rxqs)[index];
+	return priv->dev->rx_pkt_burst(frxq, pkts, pkts_n);
 }

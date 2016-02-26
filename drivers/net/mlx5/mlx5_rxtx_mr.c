@@ -113,14 +113,15 @@ mlx5_mp2mr(struct ibv_pd *pd, const struct rte_mempool *mp)
  * should only be called by txq_mp2mr().
  */
 uint32_t
-txq_mp2mr_reg(struct txq *txq, const struct rte_mempool *mp, unsigned int idx)
+txq_mp2mr_reg(struct ftxq *txq, const struct rte_mempool *mp, unsigned int idx)
 {
 	struct ibv_mr *mr;
+	struct txq *stxq = container_of(txq, struct txq, ftxq);
 
 	/* Add a new entry, register MR first. */
 	DEBUG("%p: discovered new memory pool \"%s\" (%p)",
 	      (void *)txq, mp->name, (const void *)mp);
-	mr = mlx5_mp2mr(txq->priv->pd, mp);
+	mr = mlx5_mp2mr(stxq->priv->pd, mp);
 	if (unlikely(mr == NULL)) {
 		DEBUG("%p: unable to configure MR, ibv_reg_mr() failed.",
 		      (void *)txq);
@@ -138,7 +139,7 @@ txq_mp2mr_reg(struct txq *txq, const struct rte_mempool *mp, unsigned int idx)
 	/* Store the new entry. */
 	txq->mp2mr[idx].mp = mp;
 	txq->mp2mr[idx].mr = mr;
-	txq->mp2mr[idx].lkey = mr->lkey;
+	txq->mp2mr[idx].lkey = htonl(mr->lkey);
 	DEBUG("%p: new MR lkey for MP \"%s\" (%p): 0x%08" PRIu32,
 	      (void *)txq, mp->name, (const void *)mp, txq->mp2mr[idx].lkey);
 
@@ -197,7 +198,7 @@ txq_mp2mr_mbuf_check(void *arg, void *start, void *end,
 void
 txq_mp2mr_iter(const struct rte_mempool *mp, void *arg)
 {
-	struct txq *txq = arg;
+	struct ftxq *txq = arg;
 	struct txq_mp2mr_mbuf_check_data data = {
 		.mp = mp,
 		.ret = -1,

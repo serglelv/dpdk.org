@@ -263,7 +263,8 @@ create_flow:
 static struct fdir_queue *
 priv_get_fdir_queue(struct priv *priv, uint16_t idx)
 {
-	struct fdir_queue *fdir_queue = &(*priv->rxqs)[idx]->fdir_queue;
+	struct rxq *rxq = container_of((*priv->rxqs)[idx], struct rxq, frxq);
+	struct fdir_queue *fdir_queue = &rxq->fdir_queue;
 	struct ibv_exp_rwq_ind_table *ind_table = NULL;
 	struct ibv_qp *qp = NULL;
 	struct ibv_exp_rwq_ind_table_init_attr ind_init_attr;
@@ -278,7 +279,7 @@ priv_get_fdir_queue(struct priv *priv, uint16_t idx)
 	ind_init_attr = (struct ibv_exp_rwq_ind_table_init_attr){
 		.pd = priv->pd,
 		.log_ind_tbl_size = 0,
-		.ind_tbl = &((*priv->rxqs)[idx]->wq),
+		.ind_tbl = &rxq->wq,
 		.comp_mask = 0,
 	};
 
@@ -465,7 +466,9 @@ priv_fdir_disable(struct priv *priv)
 	/* Run on every RX queue to destroy related flow director QP and
 	 * indirection table. */
 	for (i = 0; (i != priv->rxqs_n); i++) {
-		fdir_queue = &(*priv->rxqs)[i]->fdir_queue;
+		struct rxq *rxq = container_of((*priv->rxqs)[i], struct rxq, frxq);
+
+		fdir_queue = &rxq->fdir_queue;
 
 		if (fdir_queue->qp != NULL) {
 			claim_zero(ibv_destroy_qp(fdir_queue->qp));
