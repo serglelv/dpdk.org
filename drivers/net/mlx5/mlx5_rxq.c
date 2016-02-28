@@ -1258,20 +1258,28 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	};
 
 #ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING
-	if (mlx5_getenv_int("MLX5_PMD_ENABLE_PADDING")) {
+	if (mlx5_getenv_int("MLX5_PMD_ENABLE_PADDING") && priv->hw_end_padding) {
 		INFO("%p: packet padding is enabled on queue %p",
 		     (void *)dev, (void *)rxq);
 		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING;
 		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+	} else if (!priv->hw_end_padding) {
+		WARN("%p: packet padding is not supported,"
+			"please verify that supported MLNX_OFED and FW are installed",
+			(void *)dev);
 	}
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
 
 #ifdef HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT
-	if (!dev->data->dev_conf.rxmode.hw_strip_crc) {
+	if (!dev->data->dev_conf.rxmode.hw_strip_crc && priv->hw_fcs_strip) {
 		INFO("%p: FCS stripping is disabled on queue %p",
 		      (void *)dev, (void *)rxq);
 		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
 		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+	} else if (!priv->hw_fcs_strip) {
+		WARN("%p: FCS stripping configuration is not supported, "
+		      "please verify that supported MLNX_OFED and FW are installed",
+		      (void *)dev);
 	}
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
 
