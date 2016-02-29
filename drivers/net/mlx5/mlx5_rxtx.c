@@ -67,48 +67,43 @@
 #include "mlx5_rxtx.h"
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
-
-static inline volatile struct mlx5_cqe64 *
-get_cqe64(volatile struct mlx5_cqe64 cqes[],
-	  unsigned int cqes_n, uint16_t *ci)
-	  __attribute__((always_inline));
+#include "mlx5_hw.h"
 
 static inline int
-rx_poll_len(struct frxq *rxq) __attribute__((always_inline));
+check_cqe64(volatile struct mlx5_cqe64 *cqe,
+	    unsigned int cqes_n, const uint16_t ci)
+	    __attribute__((always_inline));
 
-static volatile struct mlx5_cqe64 *
-get_cqe64(volatile struct mlx5_cqe64 cqes[],
-	  unsigned int cqes_n, uint16_t *ci)
+/**
+ * Check if the CQE is valid
+ *
+ * @param  cqe
+ *   The Pointer to the CQE
+ * @param cqes_n
+ *   Completion Queue size
+ * @param ci
+ *   Pointer to the consumer index
+ *
+ * @return
+ *   0 on success, 1 on failure.
+ */
+static inline int
+check_cqe64(volatile struct mlx5_cqe64 *cqe,
+	    unsigned int cqes_n, const uint16_t ci)
 {
-	volatile struct mlx5_cqe64 *cqe;
-	uint16_t idx = *ci;
-	uint8_t op_own;
+	uint16_t idx = ci & cqes_n;
+	uint8_t op_own = cqe->op_own;
+	uint8_t op_owner = MLX5_CQE_OWNER(op_own);
+	uint8_t op_code = MLX5_CQE_OPCODE(op_own);
 
-	cqe = &cqes[idx & (cqes_n - 1)];
-	op_own = cqe->op_own;
-
-	if (unlikely((op_own & MLX5_CQE_OWNER_MASK) == !(idx & cqes_n))) {
-		return NULL;
-	} else if (unlikely(op_own & 0x80)) {
-		switch (op_own >> 4) {
-			case MLX5_CQE_INVALID:
-				return NULL; /* No CQE */
-			case MLX5_CQE_REQ_ERR:
-				return cqe;
-			case MLX5_CQE_RESP_ERR:
-				++(*ci);
-				return NULL;
-			default:
-				return NULL;
-		}
-	}
-
-	if (cqe) {
-		*ci = idx + 1;
-		return cqe;
-	}
-
-	return NULL;
+	if (unlikely((op_owner != (!!(idx))) || (op_code == MLX5_CQE_INVALID)))
+		return 1; /* No CQE */
+#ifndef NDEBUG
+	else if (unlikely((op_code != MLX5_CQE_RESP_SEND) &&
+			  (op_code != MLX5_CQE_REQ)))
+		rte_panic("Error on CQE opcode %x\n", op_code);
+#endif /* NDEBUG */
+	return 0;
 }
 
 /**
@@ -128,21 +123,26 @@ txq_complete(struct ftxq *txq)
 	unsigned int elts_tail = txq->elts_tail;
 	unsigned int elts_free = txq->elts_tail;
 	const unsigned int elts_n = txq->elts_n;
-	volatile struct mlx5_cqe64 *cqe;
-	unsigned int wcs_n = 0;
-	unsigned int max = txq->elts_comp_npr;
+	unsigned int wqe_ci = (unsigned int)-1;
+	int ret = 0;
 
-	while (wcs_n != max) {
-		cqe = get_cqe64((*txq->cqes), elts_n, &txq->cq_ci);
-		if (cqe)
-			++wcs_n;
-		else
+	while (ret == 0) {
+		unsigned int idx = txq->cq_ci & (elts_n - 1);
+		volatile struct mlx5_cqe64 *cqe = &(*txq->cqes)[idx];
+		uint8_t op_own = cqe->op_own;
+
+		ret = check_cqe64(cqe, elts_n, txq->cq_ci);
+		if (ret == 0) {
+			if (likely(MLX5_CQE_OPCODE(op_own) == MLX5_CQE_REQ))
+				wqe_ci = ntohs(cqe->wqe_counter);
+			++txq->cq_ci;
+		} else
 			break;
 	}
-	if (unlikely(wcs_n == 0))
+	if (unlikely(wqe_ci == (unsigned int)-1))
 		return;
 
-	elts_tail += wcs_n * txq->elts_comp_cd_init;
+	elts_tail = wqe_ci & (elts_n - 1);
 	if (elts_tail >= elts_n)
 		elts_tail -= elts_n;
 
@@ -163,9 +163,7 @@ txq_complete(struct ftxq *txq)
 		} while (elt != NULL);
 		elts_free = elts_free_next;
 	}
-
 	txq->elts_tail = elts_tail;
-
 	/* Update the consumer index. */
 	rte_wmb();
 	*txq->cq_db = htonl(txq->cq_ci);
@@ -457,27 +455,6 @@ rxq_cq_to_pkt_type(uint32_t flags)
 }
 
 /**
- * Get the size of the received packet.
- *
- * @param  rxq
- *   The RX queue.
- *
- * @return
- *   The packet size in bytes
- */
-static inline int __attribute__((always_inline))
-rx_poll_len(struct frxq *rxq)
-{
-	volatile struct mlx5_cqe64 *cqe;
-
-	cqe = get_cqe64(*rxq->cqes, rxq->elts_n, &rxq->cq_ci);
-	if (cqe)
-		return ntohl(cqe->byte_cnt);
-
-	return 0;
-}
-
-/**
  * DPDK callback for RX.
  *
  * The following function is the same as mlx5_rx_burst_sp(), except it doesn't
@@ -508,10 +485,12 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		struct rte_mbuf *rep;
 		struct rte_mbuf *pkt;
 		unsigned int len;
+		unsigned int ret;
 		volatile struct mlx5_wqe_data_seg *wqe = &(*rxq->wqes)[idx & wqe_cnt];
+		volatile struct mlx5_cqe64 *cqe = &(*rxq->cqes)[rxq->cq_ci & wqe_cnt];
 
 		pkt = (*rxq->elts)[idx];
-		rte_prefetch0(&(*rxq->cqes)[rxq->cq_ci & wqe_cnt]);
+		rte_prefetch0(cqe);
 		rep = __rte_mbuf_raw_alloc(rxq->mp);
 		if (unlikely(rep == NULL)) {
 			wqe->addr = htonll((uintptr_t)pkt->buf_addr +
@@ -523,12 +502,14 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		NB_SEGS(rep) = 1;
 		PORT(rep) = rxq->port_id;
 		NEXT(rep) = NULL;
-		len = rx_poll_len(rxq);
-		if (unlikely(len == 0)) {
+		ret = check_cqe64(cqe, rxq->elts_n, rxq->cq_ci);
+		if (unlikely(ret != 0)) {
 			if (rep)
 				__rte_mbuf_raw_free(rep);
 			break;
 		}
+		++rxq->cq_ci;
+		len = ntohl(cqe->byte_cnt);
 		/* Fill NIC descriptor with the new buffer.  The lkey and size
 		 * of the buffers are already known, only the buffer address
 		 * changes. */
