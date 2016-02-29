@@ -1271,16 +1271,26 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
 
 #ifdef HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT
-	if (!dev->data->dev_conf.rxmode.hw_strip_crc && priv->hw_fcs_strip) {
-		INFO("%p: FCS stripping is disabled on queue %p",
-		      (void *)dev, (void *)rxq);
+	/*
+	 * If HW CRC stripping can be disabled, but user didn't ask for it,
+	 * need to remove 4 bytes in the completion.
+	 */
+	if (priv->hw_fcs_strip && dev->data->dev_conf.rxmode.hw_strip_crc) {
 		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
 		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
-	} else if (!priv->hw_fcs_strip) {
-		WARN("%p: FCS stripping configuration is not supported, "
-		      "please verify that supported MLNX_OFED and FW are installed",
-		      (void *)dev);
+		tmpl.crc_present = 1;
+		DEBUG("FSC stripping enabled, will report 4B less");
+	} else {
+		tmpl.crc_present = 0;
+
+		if (!priv->hw_fcs_strip &&
+		    !dev->data->dev_conf.rxmode.hw_strip_crc) {
+			WARN("%p: Please verify that supported MLNX_OFED"
+			     " and FW are installed",
+			     (void *)dev);
+		}
 	}
+
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
 
 	tmpl.wq = ibv_exp_create_wq(priv->ctx, &attr.wq);

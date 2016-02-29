@@ -1112,7 +1112,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		}
 		if (ret == 0)
 			break;
-		len = ret;
+		len = ret - (rxq->crc_present << 2);
 		rep = __rte_mbuf_raw_alloc(rxq->mp);
 		if (unlikely(rep == NULL)) {
 			/*
