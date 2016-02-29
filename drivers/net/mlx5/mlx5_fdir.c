@@ -562,6 +562,29 @@ fdir_init_filters_list(struct priv *priv)
 }
 
 /**
+ * Flush all filters.
+ *
+ * @param priv
+ *   Private structure.
+ */
+static void
+priv_fdir_filter_flush(struct priv *priv)
+{
+	struct mlx5_fdir_filter *mlx5_fdir_filter;
+
+	while ((mlx5_fdir_filter = LIST_FIRST(priv->fdir_filter_list))) {
+		struct ibv_exp_flow *flow = mlx5_fdir_filter->flow;
+
+		DEBUG("%p: flushing flow director filter %p",
+		      (void *)priv, (void *)mlx5_fdir_filter);
+		LIST_REMOVE(mlx5_fdir_filter, next);
+		if (flow != NULL)
+			claim_zero(ibv_exp_destroy_flow(flow));
+		rte_free(mlx5_fdir_filter);
+	}
+}
+
+/**
  * Remove all flow director filters and delete list.
  *
  * @param priv
@@ -570,33 +593,7 @@ fdir_init_filters_list(struct priv *priv)
 void
 priv_fdir_delete_filters_list(struct priv *priv)
 {
-	struct mlx5_fdir_filter *mlx5_fdir_filter;
-	void *prev = NULL;
-
-	/* Run on every fdir filter and delete it */
-	LIST_FOREACH(mlx5_fdir_filter, priv->fdir_filter_list, next) {
-		struct ibv_exp_flow *flow;
-
-		/* Deallocate previous element safely. */
-		rte_free(prev);
-
-		/* Only valid elements should be in the list. */
-		assert(mlx5_fdir_filter != NULL);
-		flow = mlx5_fdir_filter->flow;
-
-		/* Remove element from list. */
-		LIST_REMOVE(mlx5_fdir_filter, next);
-
-		/* Destroy flow handle. */
-		if (flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(flow));
-			mlx5_fdir_filter->flow = NULL;
-		}
-
-		prev = mlx5_fdir_filter;
-	}
-
-	rte_free(prev);
+	priv_fdir_filter_flush(priv);
 	rte_free(priv->fdir_filter_list);
 	priv->fdir_filter_list = NULL;
 }
@@ -919,9 +916,6 @@ priv_fdir_ctrl_func(struct priv *priv, enum rte_filter_op filter_op, void *arg)
 		return EINVAL;
 	}
 
-	if (arg == NULL)
-		return EINVAL;
-
 	switch (filter_op) {
 	case RTE_ETH_FILTER_ADD:
 		ret = priv_fdir_filter_add(priv, arg);
@@ -931,6 +925,9 @@ priv_fdir_ctrl_func(struct priv *priv, enum rte_filter_op filter_op, void *arg)
 		break;
 	case RTE_ETH_FILTER_DELETE:
 		ret = priv_fdir_filter_delete(priv, arg);
+		break;
+	case RTE_ETH_FILTER_FLUSH:
+		priv_fdir_filter_flush(priv);
 		break;
 	case RTE_ETH_FILTER_INFO:
 		priv_fdir_info_get(priv, arg);
