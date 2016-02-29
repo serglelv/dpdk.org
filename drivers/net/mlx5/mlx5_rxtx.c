@@ -638,7 +638,8 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			} else
 #endif
 			{
-				/* Retrieve Memory Region key for this memory pool. */
+				/* Retrieve Memory Region key for this
+				 * memory pool. */
 				lkey = txq_mp2mr(txq, txq_mb2mp(buf));
 				if (unlikely(lkey == (uint32_t)-1)) {
 					/* MR does not exist. */

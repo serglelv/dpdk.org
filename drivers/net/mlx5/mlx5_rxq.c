@@ -541,7 +541,9 @@ priv_destroy_hash_rxqs(struct priv *priv)
 		assert(hash_rxq->qp != NULL);
 		/* Also check that there are no remaining flows. */
 		for (j = 0; (j != RTE_DIM(hash_rxq->special_flow)); ++j)
-			for (k = 0; (k != RTE_DIM(hash_rxq->special_flow[j])); ++k)
+			for (k = 0;
+			     (k != RTE_DIM(hash_rxq->special_flow[j]));
+			     ++k)
 				assert(hash_rxq->special_flow[j][k] == NULL);
 		for (j = 0; (j != RTE_DIM(hash_rxq->mac_flow)); ++j)
 			for (k = 0; (k != RTE_DIM(hash_rxq->mac_flow[j])); ++k)
@@ -580,7 +582,7 @@ priv_allow_flow_type(struct priv *priv, enum hash_rxq_flow_type type)
 	/* Only FLOW_TYPE_PROMISC is allowed when promiscuous mode
 	 * has been requested. */
 	if (priv->promisc_req)
-		return (type == HASH_RXQ_FLOW_TYPE_PROMISC);
+		return type == HASH_RXQ_FLOW_TYPE_PROMISC;
 	switch (type) {
 	case HASH_RXQ_FLOW_TYPE_PROMISC:
 		return !!priv->promisc_req;

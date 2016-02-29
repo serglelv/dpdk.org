@@ -218,9 +218,12 @@ hash_rxq_special_flow_disable_vlan(struct hash_rxq *hash_rxq,
 				   enum hash_rxq_flow_type flow_type,
 				   unsigned int vlan_index)
 {
-	if (hash_rxq->special_flow[flow_type][vlan_index] == NULL)
+	struct ibv_exp_flow *flow =
+		hash_rxq->special_flow[flow_type][vlan_index];
+
+	if (flow == NULL)
 		return;
-	claim_zero(ibv_exp_destroy_flow(hash_rxq->special_flow[flow_type][vlan_index]));
+	claim_zero(ibv_exp_destroy_flow(flow));
 	hash_rxq->special_flow[flow_type][vlan_index] = NULL;
 	DEBUG("%p: special flow %s (index %d) VLAN %u (index %u) disabled",
 	      (void *)hash_rxq, hash_rxq_flow_type_str(flow_type), flow_type,

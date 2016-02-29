@@ -404,7 +404,7 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.intf_version = 1,
 #endif
 #if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR) && \
-    !defined(MLX5_VERBS_VLAN_INSERTION)
+	!defined(MLX5_VERBS_VLAN_INSERTION)
 		/* Multi packet send WR can only be used outside of VF. */
 		.family_flags =
 			(!priv->vf ?

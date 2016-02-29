@@ -104,7 +104,8 @@ fdir_filter_to_flow_desc(const struct rte_eth_fdir_filter *fdir_filter,
 	/* Set MAC address. */
 	if (mode == RTE_FDIR_MODE_PERFECT_MAC_VLAN) {
 		rte_memcpy(desc->mac,
-			   fdir_filter->input.flow.mac_vlan_flow.mac_addr.addr_bytes,
+			   fdir_filter->input.flow.mac_vlan_flow.mac_addr.
+				addr_bytes,
 			   sizeof(desc->mac));
 		desc->type = HASH_RXQ_ETH;
 		return;
@@ -151,6 +152,7 @@ fdir_filter_to_flow_desc(const struct rte_eth_fdir_filter *fdir_filter,
 	case RTE_ETH_FLOW_NONFRAG_IPV6_TCP:
 		desc->src_port = fdir_filter->input.flow.udp6_flow.src_port;
 		desc->dst_port = fdir_filter->input.flow.udp6_flow.dst_port;
+		/* Fall through. */
 	case RTE_ETH_FLOW_NONFRAG_IPV6_OTHER:
 		rte_memcpy(desc->src_ip,
 			   fdir_filter->input.flow.ipv6_flow.src_ip,
@@ -185,8 +187,10 @@ priv_fdir_flow_add(struct priv *priv,
 {
 	struct ibv_exp_flow *flow;
 	struct fdir_flow_desc *desc = &mlx5_fdir_filter->desc;
-	enum rte_fdir_mode fdir_mode = priv->dev->data->dev_conf.fdir_conf.mode;
-	struct rte_eth_fdir_masks *mask = &priv->dev->data->dev_conf.fdir_conf.mask;
+	enum rte_fdir_mode fdir_mode =
+		priv->dev->data->dev_conf.fdir_conf.mode;
+	struct rte_eth_fdir_masks *mask =
+		&priv->dev->data->dev_conf.fdir_conf.mask;
 	FLOW_ATTR_SPEC_ETH(data, priv_flow_attr(priv, NULL, 0, desc->type));
 	struct ibv_exp_flow_attr *attr = &data->attr;
 	uintptr_t spec_offset = (uintptr_t)&data->spec;
@@ -498,18 +502,21 @@ priv_fdir_delete_filters_list(struct priv *priv)
 
 	/* Run on every fdir filter and delete it */
 	LIST_FOREACH(mlx5_fdir_filter, priv->fdir_filter_list, next) {
+		struct ibv_exp_flow *flow;
+
 		/* Deallocate previous element safely. */
 		rte_free(prev);
 
 		/* Only valid elements should be in the list. */
 		assert(mlx5_fdir_filter != NULL);
+		flow = mlx5_fdir_filter->flow;
 
 		/* Remove element from list. */
 		LIST_REMOVE(mlx5_fdir_filter, next);
 
 		/* Destroy flow handle. */
-		if (mlx5_fdir_filter->flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(mlx5_fdir_filter->flow));
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
 			mlx5_fdir_filter->flow = NULL;
 		}
 
@@ -536,12 +543,15 @@ priv_fdir_disable(struct priv *priv)
 
 	/* Run on every flow director filter and destroy flow handle. */
 	LIST_FOREACH(mlx5_fdir_filter, priv->fdir_filter_list, next) {
+		struct ibv_exp_flow *flow;
+
 		/* Only valid elements should be in the list */
 		assert(mlx5_fdir_filter != NULL);
+		flow = mlx5_fdir_filter->flow;
 
 		/* Destroy flow handle */
-		if (mlx5_fdir_filter->flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(mlx5_fdir_filter->flow));
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
 			mlx5_fdir_filter->flow = NULL;
 		}
 	}
@@ -557,7 +567,8 @@ priv_fdir_disable(struct priv *priv)
 		}
 
 		if (fdir_queue->ind_table != NULL) {
-			claim_zero(ibv_exp_destroy_rwq_ind_table(fdir_queue->ind_table));
+			claim_zero(ibv_exp_destroy_rwq_ind_table
+				   (fdir_queue->ind_table));
 			fdir_queue->ind_table = NULL;
 		}
 	}
@@ -698,7 +709,7 @@ priv_fdir_filter_update(struct priv *priv,
 {
 	struct mlx5_fdir_filter *mlx5_fdir_filter;
 
-	/* Validate queue number */
+	/* Validate queue number. */
 	if (fdir_filter->action.rx_queue >= priv->rxqs_n) {
 		ERROR("invalid queue number %d", fdir_filter->action.rx_queue);
 		return EINVAL;
@@ -706,14 +717,15 @@ priv_fdir_filter_update(struct priv *priv,
 
 	mlx5_fdir_filter = priv_find_filter_in_list(priv, fdir_filter);
 	if (mlx5_fdir_filter != NULL) {
+		struct ibv_exp_flow *flow = mlx5_fdir_filter->flow;
 		int err = 0;
 
 		/* Update queue number. */
 		mlx5_fdir_filter->queue = fdir_filter->action.rx_queue;
 
 		/* Destroy flow handle. */
-		if (mlx5_fdir_filter->flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(mlx5_fdir_filter->flow));
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
 			mlx5_fdir_filter->flow = NULL;
 		}
 		DEBUG("%p: flow director filter %p updated",
@@ -751,12 +763,14 @@ priv_fdir_filter_delete(struct priv *priv,
 
 	mlx5_fdir_filter = priv_find_filter_in_list(priv, fdir_filter);
 	if (mlx5_fdir_filter != NULL) {
+		struct ibv_exp_flow *flow = mlx5_fdir_filter->flow;
+
 		/* Remove element from list. */
 		LIST_REMOVE(mlx5_fdir_filter, next);
 
 		/* Destroy flow handle. */
-		if (mlx5_fdir_filter->flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(mlx5_fdir_filter->flow));
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
 			mlx5_fdir_filter->flow = NULL;
 		}
 
@@ -791,7 +805,7 @@ priv_fdir_info_get(struct priv *priv, struct rte_eth_fdir_info *fdir_info)
 	fdir_info->mode = priv->dev->data->dev_conf.fdir_conf.mode;
 	fdir_info->guarant_spc = 0;
 
-	rte_memcpy(&(fdir_info->mask), mask, sizeof(fdir_info->mask));
+	rte_memcpy(&fdir_info->mask, mask, sizeof(fdir_info->mask));
 
 	fdir_info->max_flexpayload = 0;
 	fdir_info->flow_types_mask[0] = 0;
