@@ -1277,21 +1277,21 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	 * If HW CRC stripping can be disabled, but user didn't ask for it,
 	 * need to remove 4 bytes in the completion.
 	 */
-	if (priv->hw_fcs_strip && dev->data->dev_conf.rxmode.hw_strip_crc) {
+	if (priv->hw_fcs_strip) {
 		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
 		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
-		tmpl.crc_present = 1;
-		DEBUG("FSC stripping enabled, will report 4B less");
 	} else {
-		tmpl.crc_present = 0;
-
-		if (!priv->hw_fcs_strip &&
-		    !dev->data->dev_conf.rxmode.hw_strip_crc) {
-			WARN("%p: Please verify that supported MLNX_OFED"
-			     " and FW are installed",
-			     (void *)dev);
+		if (!dev->data->dev_conf.rxmode.hw_strip_crc) {
+			WARN("%p: Please verify that supported MLNX_OFED and FW are installed",
+				(void *)dev);
 		}
 	}
+
+	tmpl.crc_present =
+		(priv->hw_fcs_strip && dev->data->dev_conf.rxmode.hw_strip_crc)
+		? 1 : 0;
+	DEBUG("FCS stripping is %s\n",
+			(tmpl.crc_present ? "enabled" : "disabled"));
 
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
 
