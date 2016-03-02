@@ -142,14 +142,14 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		enum IBV_EXP_CQ_RX_TCP_PACKET \
 		$(AUTOCONF_OUTPUT)
 	$Q sh -- '$<' '$@' \
-		HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING \
-		infiniband/verbs.h \
-		enum IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING \
-		$(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
-		HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT \
+		HAVE_VERBS_FCS \
 		infiniband/verbs.h \
 		enum IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS \
+		$(AUTOCONF_OUTPUT)
+	$Q sh -- '$<' '$@' \
+		HAVE_VERBS_RX_END_PADDING \
+		infiniband/verbs.h \
+		enum IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING \
 		$(AUTOCONF_OUTPUT)
 	$Q sh -- '$<' '$@' \
 		HAVE_VERBS_VLAN_INSERTION \

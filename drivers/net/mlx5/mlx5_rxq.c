@@ -1259,41 +1259,43 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 #endif /* HAVE_EXP_DEVICE_ATTR_VLAN_OFFLOADS */
 	};
 
-#ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING
-	if (mlx5_getenv_int("MLX5_PMD_ENABLE_PADDING") && priv->hw_end_padding) {
-		INFO("%p: packet padding is enabled on queue %p",
-		     (void *)dev, (void *)rxq);
-		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING;
+#ifdef HAVE_VERBS_FCS
+	/* By default, FCS (CRC) is stripped by hardware. */
+	if (dev->data->dev_conf.rxmode.hw_strip_crc) {
+		tmpl.crc_present = 0;
+	} else if (priv->hw_fcs_strip) {
+		/* Ask HW/Verbs to leave CRC in place when supported. */
+		attr.wq.flags |= IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
 		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
-	} else if (!priv->hw_end_padding) {
-		WARN("%p: packet padding is not supported,"
-			"please verify that supported MLNX_OFED and FW are installed",
-			(void *)dev);
-	}
-#endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
-
-#ifdef HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT
-	/*
-	 * If HW CRC stripping can be disabled, but user didn't ask for it,
-	 * need to remove 4 bytes in the completion.
-	 */
-	if (priv->hw_fcs_strip) {
-		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
-		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+		tmpl.crc_present = 1;
 	} else {
-		if (!dev->data->dev_conf.rxmode.hw_strip_crc) {
-			WARN("%p: Please verify that supported MLNX_OFED and FW are installed",
-				(void *)dev);
-		}
+		WARN("%p: CRC stripping has been disabled but will still"
+		     " be performed by hardware, make sure MLNX_OFED and"
+		     " firmware are up to date",
+		     (void *)dev);
+		tmpl.crc_present = 0;
 	}
+	DEBUG("%p: CRC stripping is %s, %u bytes will be subtracted from"
+	      " incoming frames to hide it",
+	      (void *)dev,
+	      tmpl.crc_present ? "disabled" : "enabled",
+	      tmpl.crc_present << 2);
+#endif /* HAVE_VERBS_FCS */
 
-	tmpl.crc_present =
-		(priv->hw_fcs_strip && dev->data->dev_conf.rxmode.hw_strip_crc)
-		? 1 : 0;
-	DEBUG("FCS stripping is %s\n",
-			(tmpl.crc_present ? "enabled" : "disabled"));
-
-#endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
+#ifdef HAVE_VERBS_RX_END_PADDING
+	if (!mlx5_getenv_int("MLX5_PMD_ENABLE_PADDING"))
+		; /* Nothing else to do. */
+	else if (priv->hw_padding) {
+		INFO("%p: enabling packet padding on queue %p",
+		     (void *)dev, (void *)rxq);
+		attr.wq.flags |= IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING;
+		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+	} else
+		WARN("%p: packet padding has been requested but is not"
+		     " supported, make sure MLNX_OFED and firmware are"
+		     " up to date",
+		     (void *)dev);
+#endif /* HAVE_VERBS_RX_END_PADDING */
 
 	tmpl.wq = ibv_exp_create_wq(priv->ctx, &attr.wq);
 	if (tmpl.wq == NULL) {

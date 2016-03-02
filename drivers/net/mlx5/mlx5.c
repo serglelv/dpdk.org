@@ -439,19 +439,18 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		DEBUG("VLAN stripping is %ssupported",
 		      (priv->hw_vlan_strip ? "" : "not "));
 
-#ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING
-		priv->hw_end_padding =
-				!!(exp_device_attr.rx_pad_end_addr_align);
-#endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
-		DEBUG("HW Padding is %ssupported",
-		      (priv->hw_end_padding ? "" : "not "));
-
-#ifdef HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT
+#ifdef HAVE_VERBS_FCS
 		priv->hw_fcs_strip = !!(exp_device_attr.exp_device_cap_flags &
-				IBV_EXP_DEVICE_SCATTER_FCS);
-#endif /* HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT */
+					IBV_EXP_DEVICE_SCATTER_FCS);
+#endif /* HAVE_VERBS_FCS */
 		DEBUG("FCS stripping configuration is %ssupported",
 		      (priv->hw_fcs_strip ? "" : "not "));
+
+#ifdef HAVE_VERBS_RX_END_PADDING
+		priv->hw_padding = !!exp_device_attr.rx_pad_end_addr_align;
+#endif /* HAVE_VERBS_RX_END_PADDING */
+		DEBUG("hardware RX end alignment padding is %ssupported",
+		      (priv->hw_padding ? "" : "not "));
 
 #else /* HAVE_EXP_QUERY_DEVICE */
 		priv->ind_table_max_size = RSS_INDIRECTION_TABLE_SIZE;
