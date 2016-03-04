@@ -978,17 +978,6 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	};
-	attr.cq_attr = (struct ibv_exp_cq_attr) {
-		.comp_mask = IBV_EXP_CQ_ATTR_CQ_CAP_FLAGS,
-		.cq_cap_flags = IBV_EXP_CQ_IGNORE_OVERRUN,
-	};
-	ret = ibv_exp_modify_cq(tmpl.cq, &attr.cq_attr, IBV_EXP_CQ_CAP_FLAGS);
-	if (ret) {
-		ret = ENOSYS;
-		ERROR("%p: CQ modification failure: %s",
-		      (void *)dev, strerror(ret));
-		goto error;
-	}
 	DEBUG("priv->device_attr.max_qp_wr is %d",
 	      priv->device_attr.max_qp_wr);
 	DEBUG("priv->device_attr.max_sge is %d",

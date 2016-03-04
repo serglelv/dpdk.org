@@ -121,11 +121,8 @@ get_cqe64(volatile struct mlx5_cqe64 cqes[],
  *
  * @param txq
  *   Pointer to TX queue structure.
- *
- * @return
- *   0 on success, -1 on failure.
  */
-static int
+static void
 txq_complete(struct ftxq *txq)
 {
 	unsigned int elts_tail = txq->elts_tail;
@@ -143,7 +140,7 @@ txq_complete(struct ftxq *txq)
 			break;
 	}
 	if (unlikely(wcs_n == 0))
-		return 0;
+		return;
 
 	elts_tail += wcs_n * txq->elts_comp_cd_init;
 	if (elts_tail >= elts_n)
@@ -172,8 +169,6 @@ txq_complete(struct ftxq *txq)
 	/* Update the consumer index. */
 	rte_wmb();
 	*txq->cq_db = htonl(txq->cq_ci);
-
-	return 0;
 }
 
 /**
@@ -331,7 +326,7 @@ uint16_t
 mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 {
 	struct ftxq *txq = (struct ftxq *)dpdk_txq;
-	unsigned int elts_head = txq->elts_head;
+	uint16_t elts_head = txq->elts_head;
 	const unsigned int elts_n = txq->elts_n;
 	unsigned int i;
 	unsigned int max;
@@ -546,7 +541,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 
 #ifdef MLX5_PMD_SOFT_COUNTERS
 		/* Increment bytes counter. */
-		rxq->stats.ibytes += i;
+		rxq->stats.ibytes += len;
 #endif
 		/* Return packet. */
 		*(pkts++) = pkt;
