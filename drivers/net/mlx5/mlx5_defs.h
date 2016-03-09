@@ -54,6 +54,9 @@
 /* RSS Indirection table size. */
 #define RSS_INDIRECTION_TABLE_SIZE 512
 
+/* TX Completion Queue size. */
+#define MLX5_TX_CQ_SIZE 16
+
 /*
  * Maximum number of cached Memory Pools (MPs) per TX queue. Each RTE MP
  * from which buffers are to be transmitted will have to be mapped by this

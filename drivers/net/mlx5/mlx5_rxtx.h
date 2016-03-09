@@ -241,7 +241,7 @@ struct ftxq {
 	uint16_t wqe_ci;
 	uint16_t bf_offset;
 	uint16_t bf_buf_size;
-	volatile struct mlx5_cqe64 (*cqes)[];
+	volatile struct mlx5_cqe64 (*cqes)[MLX5_TX_CQ_SIZE];
 	volatile struct mlx5_wqe64 (*wqes)[];
 	volatile uint32_t *qp_db;
 	volatile uint32_t *cq_db;

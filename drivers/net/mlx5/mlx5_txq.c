@@ -280,7 +280,7 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
 		.res_domain = tmpl.rd,
 	};
-	tmpl.cq = ibv_exp_create_cq(priv->ctx, desc - 1,
+	tmpl.cq = ibv_exp_create_cq(priv->ctx, MLX5_TX_CQ_SIZE - 1,
 				    NULL, NULL, 0, &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
