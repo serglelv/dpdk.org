@@ -295,12 +295,14 @@ static inline void
 mlx5_tx_dbrec(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe) {
 	volatile uintptr_t *dst = (volatile uintptr_t *)
 		((uintptr_t)txq->bf_reg + txq->bf_offset);
+	volatile uintptr_t *src = (volatile uintptr_t *)
+		((uintptr_t) &wqe);
 
 	rte_wmb();
 	*txq->qp_db = htonl(txq->wqe_ci);
 	/* This wc_wmb ensures ordering between DB record and BF copy */
 	rte_wmb();
-	COPY_64B_NT(dst, wqe);
+	COPY_64B_NT(dst, src);
 	txq->bf_offset ^= txq->bf_buf_size;
 }
 
