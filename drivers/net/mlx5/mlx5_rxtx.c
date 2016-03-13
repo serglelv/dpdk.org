@@ -263,7 +263,7 @@ txq_mp2mr(struct ftxq *txq, const struct rte_mempool *mp)
 		}
 		if (txq->mp2mr[i].mp == mp) {
 			assert(txq->mp2mr[i].lkey != (uint32_t)-1);
-			assert(txq->mp2mr[i].mr->lkey == txq->mp2mr[i].lkey);
+			assert(htonl((txq->mp2mr[i].mr->lkey) == txq->mp2mr[i].lkey);
 			lkey = txq->mp2mr[i].lkey;
 			break;
 		}
@@ -335,7 +335,7 @@ mlx5_tx_dbrec(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe) {
 	volatile uintptr_t *dst = (volatile uintptr_t *)
 		((uintptr_t)txq->bf_reg + txq->bf_offset);
 	volatile uintptr_t *src = (volatile uintptr_t *)
-		((uintptr_t) &wqe);
+		((uintptr_t)wqe);
 
 	rte_wmb();
 	*txq->qp_db = htonl(txq->wqe_ci);
