@@ -80,10 +80,12 @@ txq_alloc_elts(struct txq *txq, unsigned int elts_n)
 	unsigned int i;
 	unsigned int comp = txq->ftxq.elts_comp_cd_init;
 
-	for (i = 0; (i != elts_n); ++i) {
+	for (i = 0; (i != elts_n); ++i)
+		(*txq->ftxq.elts)[i] = NULL;
+
+	for (i = 0; (i != txq->ftxq.wqe_cnt); ++i) {
 		volatile struct mlx5_wqe64 *wqe = &(*txq->ftxq.wqes)[i];
 
-		(*txq->ftxq.elts)[i] = NULL;
 		memset((void *)(uintptr_t)wqe, 0, sizeof(struct mlx5_wqe64));
 		wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 		wqe->ctrl.data[1] = htonl((txq->ftxq.qp_num << 8) | 4);
@@ -98,6 +100,7 @@ txq_alloc_elts(struct txq *txq, unsigned int elts_n)
 	DEBUG("%p: allocated and configured %u WRs", (void *)txq, elts_n);
 	txq->ftxq.elts_head = 0;
 	txq->ftxq.elts_tail = 0;
+	txq->ftxq.elts_comp = txq->ftxq.elts_comp_cd_init;
 }
 
 /**
@@ -209,6 +212,7 @@ txq_ftxq_setup(struct txq *tmpl, struct txq *txq)
 	tmpl->ftxq.wqes =
 		(volatile struct mlx5_wqe64 (*)[])
 		(uintptr_t)qp->gen_data.sqstart;
+	tmpl->ftxq.wqe_cnt = qp->sq.wqe_cnt;
 	tmpl->ftxq.qp_db = &qp->gen_data.db[MLX5_SND_DBR];
 	tmpl->ftxq.bf_reg = qp->gen_data.bf->reg;
 	tmpl->ftxq.bf_offset = qp->gen_data.bf->offset;
@@ -304,6 +308,9 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 					desc),
 			/* Max number of scatter/gather elements in a WR. */
 			.max_send_sge = 1,
+#if MLX5_PMD_MAX_INLINE > 0
+			.max_inline_data = MLX5_PMD_MAX_INLINE,
+#endif
 		},
 		.qp_type = IBV_QPT_RAW_PACKET,
 		/* Do *NOT* enable this, completions events are managed per

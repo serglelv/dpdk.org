@@ -57,6 +57,11 @@
 /* TX Completion Queue size. */
 #define MLX5_TX_CQ_SIZE 16
 
+/* Maximum size for inline data. */
+#ifndef MLX5_PMD_MAX_INLINE
+#define MLX5_PMD_MAX_INLINE 0
+#endif
+
 /*
  * Maximum number of cached Memory Pools (MPs) per TX queue. Each RTE MP
  * from which buffers are to be transmitted will have to be mapped by this

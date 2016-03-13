@@ -150,6 +150,7 @@ txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
 	return wqe_ci;
 }
 
+#if MLX5_PMD_MAX_INLINE == 0
 /**
  * Manage TX completions.
  *
@@ -215,6 +216,65 @@ txq_complete(struct ftxq *txq)
 	*txq->cq_db = htonl(txq->cq_ci);
 }
 
+#else /* MLX5_PMD_MAX_INLINE == 0 */
+
+static void
+txq_complete(struct ftxq *txq)
+{
+	const unsigned int elts_n = txq->elts_n;
+	const unsigned int cqe_n = MLX5_TX_CQ_SIZE - 1;
+	uint16_t elts_free = txq->elts_tail;
+	uint16_t elts_tail = txq->elts_tail;
+	uint16_t cq_ci = txq->cq_ci;
+	unsigned int npolled = 0;
+	int ret = 0;
+
+	while (ret == 0) {
+		unsigned int idx = cq_ci & cqe_n;
+		volatile struct mlx5_cqe64 *cqe = &(*txq->cqes)[idx];
+
+		ret = check_cqe64(cqe, MLX5_TX_CQ_SIZE, cq_ci);
+		if (ret == 1)
+			break;
+
+		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED)
+			npolled += ntohl(cqe->byte_cnt);
+		else if ((MLX5_CQE_OPCODE(cqe->op_own) == MLX5_CQE_REQ)) {
+			npolled++;
+			++cq_ci;
+		}
+	}
+	if (unlikely(npolled == 0))
+		return;
+	/* Free buffers. */
+	elts_tail += npolled * txq->elts_comp_cd_init;
+	if (elts_tail >= elts_n)
+		elts_tail -= elts_n;
+	while (elts_free != elts_tail) {
+		struct rte_mbuf *elt = (*txq->elts)[elts_free];
+		unsigned int elts_free_next =
+			(elts_free + 1) & (elts_n - 1);
+		struct rte_mbuf *elt_next = (*txq->elts)[elts_free_next];
+
+		(*txq->elts)[elts_free] = NULL;
+		RTE_MBUF_PREFETCH_TO_FREE(elt_next);
+		/* Faster than rte_pktmbuf_free(). */
+		do {
+			struct rte_mbuf *next = NEXT(elt);
+
+			rte_pktmbuf_free_seg(elt);
+			elt = next;
+		} while (elt != NULL);
+		elts_free = elts_free_next;
+	}
+	txq->cq_ci = cq_ci;
+	txq->elts_tail = elts_tail;
+	/* Update the consumer index. */
+	rte_wmb();
+	*txq->cq_db = htonl(txq->cq_ci);
+}
+#endif /* MLX5_PMD_MAX_INLINE == 0 */
+
 /**
  * Get Memory Pool (MP) from mbuf. If mbuf is indirect, the pool from which
  * the cloned mbuf is allocated is returned instead.
@@ -263,7 +323,8 @@ txq_mp2mr(struct ftxq *txq, const struct rte_mempool *mp)
 		}
 		if (txq->mp2mr[i].mp == mp) {
 			assert(txq->mp2mr[i].lkey != (uint32_t)-1);
-			assert(htonl((txq->mp2mr[i].mr->lkey) == txq->mp2mr[i].lkey);
+			assert(htonl(txq->mp2mr[i].mr->lkey) ==
+			       txq->mp2mr[i].lkey);
 			lkey = txq->mp2mr[i].lkey;
 			break;
 		}
@@ -274,6 +335,7 @@ txq_mp2mr(struct ftxq *txq, const struct rte_mempool *mp)
 	return lkey;
 }
 
+#if MLX5_PMD_MAX_INLINE == 0
 static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       uintptr_t addr, uint32_t length, uint32_t lkey)
@@ -297,6 +359,94 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	/* Increase the consumer index. */
 	++txq->wqe_ci;
 }
+
+#else /* MLX5_PMD_MAX_INLINE == 0 */
+
+static inline void
+mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+	       uintptr_t addr, uint32_t length, uint32_t lkey)
+{
+	/* Copy the first 16 bytes into the inline header */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       MLX5_ETH_INLINE_HEADER_SIZE);
+	addr += MLX5_ETH_INLINE_HEADER_SIZE;
+	length -= MLX5_ETH_INLINE_HEADER_SIZE;
+
+	wqe->dseg.byte_count = htonl(length);
+	wqe->dseg.lkey = lkey;
+	wqe->dseg.addr = htonll(addr);
+
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | 4);
+	if (unlikely(--txq->elts_comp == 0)) {
+		wqe->ctrl.data[2] = htonl(8);
+		txq->elts_comp = txq->elts_comp_cd_init;
+	} else
+		wqe->ctrl.data[2] = htonl(0);
+	wqe->ctrl.data[3] = 0;
+
+	/* Increase the consumer index. */
+	++txq->wqe_ci;
+}
+
+static inline void
+mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+		      uintptr_t addr, uint32_t length)
+{
+	uint32_t size;
+	uint32_t wqes_cnt = 1;
+	volatile struct mlx5_wqe64_inl *inl_wqe =
+		(volatile struct mlx5_wqe64_inl *)wqe;
+
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
+	/* Copy the first 16 bytes into the inline header */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       MLX5_ETH_INLINE_HEADER_SIZE);
+	addr += MLX5_ETH_INLINE_HEADER_SIZE;
+	length -= MLX5_ETH_INLINE_HEADER_SIZE;
+
+	size = (sizeof(wqe->ctrl.ctrl) +
+		sizeof(wqe->eseg) +
+		sizeof(wqe->dseg.byte_count) +
+		length + 15) / 16;
+
+	wqe->dseg.byte_count = htonl(length | MLX5_INLINE_SEG);
+	memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
+	       (void *)addr, MLX5_WQE64_INL_DATA);
+	addr += MLX5_WQE64_INL_DATA;
+	length -= MLX5_WQE64_INL_DATA;
+
+	while (length) {
+		volatile struct mlx5_wqe64_inl *wqe_next =
+			(volatile struct mlx5_wqe64_inl *)
+			&(*txq->wqes)[(txq->wqe_ci + wqes_cnt) &
+				      (txq->wqe_cnt - 1)];
+		uint32_t copy_bytes = (length > sizeof(*wqe)) ?
+				      sizeof(*wqe) :
+				      length;
+
+		memcpy((void *)(uintptr_t)wqe_next->wqe.data, (void *)addr,
+		       copy_bytes);
+		addr += copy_bytes;
+		length -= copy_bytes;
+		wqes_cnt++;
+	}
+
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | (size & 0x3f));
+	if (unlikely(--txq->elts_comp == 0)) {
+		wqe->ctrl.data[2] = htonl(8);
+		txq->elts_comp = txq->elts_comp_cd_init;
+	} else
+		wqe->ctrl.data[2] = htonl(0);
+	wqe->ctrl.data[3] = 0;
+
+	/* Increase the consumer index. */
+	txq->wqe_ci += wqes_cnt;
+}
+#endif /* MLX5_PMD_MAX_INLINE == 0 */
 
 /*
  * Avoid using memcpy() to copy to BlueFlame page, since memcpy()
@@ -405,7 +555,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		uint32_t lkey;
 		uintptr_t buf_next_addr;
 
-		wqe = &(*txq->wqes)[elts_head];
+		wqe = &(*txq->wqes)[txq->wqe_ci &  (txq->wqe_cnt - 1)];
 		rte_prefetch0(wqe);
 		if (i + 1 < max)
 			rte_prefetch0(buf_next);
@@ -435,9 +585,16 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			rte_prefetch0((volatile void *)
 				      (uintptr_t)buf_next_addr);
 		}
-		/* Retrieve Memory Region key for this memory pool. */
-		lkey = txq_mp2mr(txq, txq_mb2mp(buf));
-		mlx5_wqe_write(txq, wqe, addr, length, lkey);
+#if MLX5_PMD_MAX_INLINE > 0
+		if (length <= MLX5_PMD_MAX_INLINE)
+			mlx5_wqe_write_inline(txq, wqe, addr, length);
+		else
+#endif
+		{
+			/* Retrieve Memory Region key for this memory pool. */
+			lkey = txq_mp2mr(txq, txq_mb2mp(buf));
+			mlx5_wqe_write(txq, wqe, addr, length, lkey);
+		}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 			sent_size += length;
 #endif

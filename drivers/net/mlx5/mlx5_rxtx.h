@@ -231,14 +231,26 @@ struct mlx5_wqe64 {
 	struct mlx5_wqe_data_seg dseg;
 };
 
+#define MLX5_WQE64_INL_DATA 12
+#define MLX5_WQE64_INL_DATA_OFFSET 52
+
+struct mlx5_wqe64_inl {
+	union {
+		struct mlx5_wqe64 wqe;
+		char data[64];
+	} wqe;
+};
+
 struct ftxq {
 	uint16_t elts_head; /* Current index in (*elts)[]. */
 	uint16_t elts_tail; /* First element awaiting completion. */
 	uint16_t elts_comp_cd_init; /* Initial value for countdown. */
 	uint16_t elts_comp_npr; /* number of completion per ring. */
+	uint16_t elts_comp; /* number of completion per ring. */
 	uint16_t elts_n;
 	uint16_t cq_ci;
 	uint16_t wqe_ci;
+	uint16_t wqe_cnt;
 	uint16_t bf_offset;
 	uint16_t bf_buf_size;
 	volatile struct mlx5_cqe64 (*cqes)[MLX5_TX_CQ_SIZE];
