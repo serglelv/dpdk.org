@@ -69,6 +69,13 @@
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
 
+/* Device parameter to configure inline send. */
+#define MLX5_TXQ_INLINE "txq_inline"
+
+/* Device parameter to configure the number of TX queues threshold for
+ * enabling inline send. */
+#define MLX5_TXQS_MIN_INLINE "txqs_min_inline"
+
 /**
  * Retrieve integer value from environment variable.
  *
@@ -285,12 +292,29 @@ mlx5_args_check(const char *key, const char *val, void *opaque)
 {
 	struct priv *priv = opaque;
 
-	/* No parameters are expected at the moment. */
-	(void)priv;
-	(void)val;
-	(void)mlx5_args_convert;
-	WARN("%s: unknown parameter", key);
-	return EINVAL;
+	if (strcmp(MLX5_TXQ_INLINE, key) == 0) {
+		unsigned long value;
+		int ret;
+
+		ret = mlx5_args_convert(key, val, &value);
+		if (ret != 0)
+			priv->txq_inline = 0;
+		else
+			priv->txq_inline = value;
+	} else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0) {
+		unsigned long value;
+		int ret;
+
+		ret = mlx5_args_convert(key, val, &value);
+		if (ret != 0)
+			priv->txqs_inline = 0;
+		else
+			priv->txqs_inline = value;
+	} else {
+		WARN("%s: unknown parameter", key);
+		return EINVAL;
+	}
+	return 0;
 }
 
 /**
@@ -308,7 +332,8 @@ static int
 mlx5_args(struct priv *priv, struct rte_devargs *devargs)
 {
 	static const char *params[] = {
-		NULL,
+		MLX5_TXQ_INLINE,
+		MLX5_TXQS_MIN_INLINE,
 	};
 	struct rte_kvargs *kvlist;
 	int ret = 0;
