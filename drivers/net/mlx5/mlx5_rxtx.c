@@ -106,6 +106,7 @@ check_cqe64(volatile struct mlx5_cqe64 *cqe,
 	return 0;
 }
 
+#if MLX5_PMD_MAX_INLINE == 0
 /**
  * Manage TX compressed completions.
  *
@@ -150,7 +151,6 @@ txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
 	return wqe_ci;
 }
 
-#if MLX5_PMD_MAX_INLINE == 0
 /**
  * Manage TX completions.
  *
@@ -218,6 +218,50 @@ txq_complete(struct ftxq *txq)
 
 #else /* MLX5_PMD_MAX_INLINE == 0 */
 
+/**
+ * Manage TX compressed completions.
+ *
+ * @param txq
+ *   Pointer to TX queue structure.
+ * @param  cqe
+ *   Poniter to the compressed CQE.
+ * @param cq_ci
+ *   Pointer to the current consumer index.
+ *
+ * @retrun
+ *   Number of received completions.
+ */
+static inline uint32_t
+txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
+			uint16_t *cq_ci)
+{
+	uint32_t cqe_cnt = ntohl(cqe->byte_cnt);
+	const unsigned int cqe_n = MLX5_TX_CQ_SIZE - 1;
+	uint32_t cqe_polled;
+
+	cqe_polled = cqe_cnt;
+	/* Reset the owner bit in all CQE. */
+	while(cqe_cnt) {
+		cqe = &(*txq->cqes)[(*cq_ci) & cqe_n];
+		cqe->op_own = MLX5_CQE_INVALIDATE(0);
+		++(*cq_ci);
+		--cqe_cnt;
+	}
+
+	return cqe_polled;
+}
+
+/**
+ * Manage TX completions.
+ *
+ * When sending a burst, mlx5_tx_burst() posts several WRs.
+ * To improve performance, a completion event is only required once every
+ * MLX5_PMD_TX_PER_COMP_REQ sends. Doing so discards completion information
+ * for other WRs, but this information would not be used anyway.
+ *
+ * @param txq
+ *   Pointer to TX queue structure.
+ */
 static void
 txq_complete(struct ftxq *txq)
 {
@@ -238,7 +282,7 @@ txq_complete(struct ftxq *txq)
 			break;
 
 		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED)
-			npolled += ntohl(cqe->byte_cnt);
+			npolled += txq_complete_compressed(txq, cqe, &cq_ci);
 		else if ((MLX5_CQE_OPCODE(cqe->op_own) == MLX5_CQE_REQ)) {
 			npolled++;
 			++cq_ci;
