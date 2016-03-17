@@ -97,6 +97,8 @@ struct frxq {
 	uint16_t cq_ci;
 	uint16_t elts_n;
 	uint16_t port_id;
+	unsigned int csum:1; /* Enable checksum offloading. */
+	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
 	volatile struct mlx5_wqe_data_seg (*wqes)[];
 	volatile struct mlx5_cqe64 (*cqes)[];
 	volatile uint32_t *rq_db;

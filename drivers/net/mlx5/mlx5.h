@@ -230,6 +230,8 @@ void mlx5_stats_reset(struct rte_eth_dev *);
 /* mlx5_vlan.c */
 
 int mlx5_vlan_filter_set(struct rte_eth_dev *, uint16_t, int);
+void mlx5_vlan_offload_set(struct rte_eth_dev *, int);
+void mlx5_vlan_strip_queue_set(struct rte_eth_dev *, uint16_t, int);
 
 /* mlx5_trigger.c */
 

@@ -982,6 +982,12 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	      priv->device_attr.max_qp_wr);
 	DEBUG("priv->device_attr.max_sge is %d",
 	      priv->device_attr.max_sge);
+	/* Toggle RX checksum offload if hardware supports it. */
+	if (priv->hw_csum)
+		tmpl.frxq.csum = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
+	/* Toggle VLAN stripping if hardware supports it. */
+	if (priv->hw_vlan_strip)
+		tmpl.frxq.vlan_strip = dev->data->dev_conf.rxmode.hw_vlan_strip;
 	attr.wq = (struct ibv_exp_wq_init_attr){
 		.wq_context = NULL, /* Could be useful in the future. */
 		.wq_type = IBV_EXP_WQT_RQ,
@@ -995,8 +1001,12 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		.cq = tmpl.cq,
 		.comp_mask =
 			IBV_EXP_CREATE_WQ_RES_DOMAIN |
+			IBV_EXP_CREATE_WQ_VLAN_OFFLOADS |
 			0,
 		.res_domain = tmpl.rd,
+		.vlan_offloads = (tmpl.frxq.vlan_strip ?
+				  IBV_EXP_RECEIVE_WQ_CVLAN_STRIP :
+				  0),
 	};
 
 #ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING

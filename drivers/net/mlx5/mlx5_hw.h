@@ -60,6 +60,8 @@
 #define MLX5_CQE_INVALIDATE(own) \
 	((MLX5_CQE_INVALID << 4) | (own & MLX5_CQE_OWNER_MASK))
 
+#define MLX5_CQE_VLAN_STRIPPED	0x1
+
 struct mlx5_cqe_comp {
 	uint8_t comp_flag;
 	uint8_t scqe_idx;

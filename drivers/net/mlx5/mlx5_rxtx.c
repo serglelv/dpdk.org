@@ -384,7 +384,6 @@ static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       uintptr_t addr, uint32_t length, uint32_t lkey)
 {
-
 	/* Copy the first 16 bytes into the inline header */
 	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
 	       (void *)(uintptr_t)addr,
@@ -404,18 +403,88 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	++txq->wqe_ci;
 }
 
+static inline void
+mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+	       uintptr_t addr, uint32_t length, uint32_t lkey,
+	       uint16_t *vlan_tci)
+{
+	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
+
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
+	/*
+	 * Copy 12 bytes of source & destination MAC address.
+	 * Copy 4 bytes of vlan.
+	 * Copy 2 bytes of ether type.
+	 */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start, (void *)(uintptr_t)addr, 12);
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12), &vlan, sizeof(vlan));
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16), (void *)((uintptr_t)addr + 12), 2);
+
+	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
+	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
+
+	wqe->dseg.byte_count = htonl(length);
+	wqe->dseg.lkey = lkey;
+	wqe->dseg.addr = htonll(addr);
+
+	/* Write only data[0] which is the single element which changes.
+	 * Other fields are already initialised in txq_alloc_elts. */
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+
+	/* Increase the consumer index. */
+	++txq->wqe_ci;
+}
+
 #else /* MLX5_PMD_MAX_INLINE == 0 */
 
 static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       uintptr_t addr, uint32_t length, uint32_t lkey)
 {
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 	/* Copy the first 16 bytes into the inline header */
 	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
 	       (void *)(uintptr_t)addr,
 	       MLX5_ETH_INLINE_HEADER_SIZE);
 	addr += MLX5_ETH_INLINE_HEADER_SIZE;
 	length -= MLX5_ETH_INLINE_HEADER_SIZE;
+
+	wqe->dseg.byte_count = htonl(length);
+	wqe->dseg.lkey = lkey;
+	wqe->dseg.addr = htonll(addr);
+
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | 4);
+	if (unlikely(--txq->elts_comp == 0)) {
+		wqe->ctrl.data[2] = htonl(8);
+		txq->elts_comp = txq->elts_comp_cd_init;
+	} else
+		wqe->ctrl.data[2] = htonl(0);
+	wqe->ctrl.data[3] = 0;
+
+	/* Increase the consumer index. */
+	++txq->wqe_ci;
+}
+
+static inline void
+mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+	       uintptr_t addr, uint32_t length, uint32_t lkey,
+	       uint16_t *vlan_tci)
+{
+	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
+
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
+	/*
+	 * Copy 12 bytes of source & destination MAC address.
+	 * Copy 4 bytes of vlan.
+	 * Copy 2 bytes of ether type.
+	 */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start, (void *)(uintptr_t)addr, 12);
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12), &vlan, sizeof(vlan));
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16), (void *)((uintptr_t)addr + 12), 2);
+
+	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
+	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 
 	wqe->dseg.byte_count = htonl(length);
 	wqe->dseg.lkey = lkey;
@@ -450,6 +519,69 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       MLX5_ETH_INLINE_HEADER_SIZE);
 	addr += MLX5_ETH_INLINE_HEADER_SIZE;
 	length -= MLX5_ETH_INLINE_HEADER_SIZE;
+
+	size = (sizeof(wqe->ctrl.ctrl) +
+		sizeof(wqe->eseg) +
+		sizeof(wqe->dseg.byte_count) +
+		length + 15) / 16;
+
+	wqe->dseg.byte_count = htonl(length | MLX5_INLINE_SEG);
+	memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
+	       (void *)addr, MLX5_WQE64_INL_DATA);
+	addr += MLX5_WQE64_INL_DATA;
+	length -= MLX5_WQE64_INL_DATA;
+
+	while (length) {
+		volatile struct mlx5_wqe64_inl *wqe_next =
+			(volatile struct mlx5_wqe64_inl *)
+			&(*txq->wqes)[(txq->wqe_ci + wqes_cnt) &
+				      (txq->wqe_cnt - 1)];
+		uint32_t copy_bytes = (length > sizeof(*wqe)) ?
+				      sizeof(*wqe) :
+				      length;
+
+		memcpy((void *)(uintptr_t)wqe_next->wqe.data, (void *)addr,
+		       copy_bytes);
+		addr += copy_bytes;
+		length -= copy_bytes;
+		wqes_cnt++;
+	}
+
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | (size & 0x3f));
+	if (unlikely(--txq->elts_comp == 0)) {
+		wqe->ctrl.data[2] = htonl(8);
+		txq->elts_comp = txq->elts_comp_cd_init;
+	} else
+		wqe->ctrl.data[2] = htonl(0);
+	wqe->ctrl.data[3] = 0;
+
+	/* Increase the consumer index. */
+	txq->wqe_ci += wqes_cnt;
+}
+
+static inline void
+mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+		      uintptr_t addr, uint32_t length, uint16_t *vlan_tci)
+{
+	uint32_t size;
+	uint32_t wqes_cnt = 1;
+	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
+	volatile struct mlx5_wqe64_inl *inl_wqe =
+		(volatile struct mlx5_wqe64_inl *)wqe;
+
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
+	/*
+	 * Copy 12 bytes of source & destination MAC address.
+	 * Copy 4 bytes of vlan.
+	 * Copy 2 bytes of ether type.
+	 */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start, (void *)(uintptr_t)addr, 12);
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12), &vlan, sizeof(vlan));
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16), (void *)((uintptr_t)addr + 12), 2);
+
+	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
+	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 
 	size = (sizeof(wqe->ctrl.ctrl) +
 		sizeof(wqe->eseg) +
@@ -631,13 +763,22 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		}
 #if MLX5_PMD_MAX_INLINE > 0
 		if (length <= MLX5_PMD_MAX_INLINE)
-			mlx5_wqe_write_inline(txq, wqe, addr, length);
+			if (buf->ol_flags & PKT_TX_VLAN_PKT)
+				mlx5_wqe_write_inline_vlan(txq, wqe,
+							   addr, length,
+							   &buf->vlan_tci);
+			else
+				mlx5_wqe_write_inline(txq, wqe, addr, length);
 		else
 #endif
 		{
 			/* Retrieve Memory Region key for this memory pool. */
 			lkey = txq_mp2mr(txq, txq_mb2mp(buf));
-			mlx5_wqe_write(txq, wqe, addr, length, lkey);
+			if (buf->ol_flags & PKT_TX_VLAN_PKT)
+				mlx5_wqe_write_vlan(txq, wqe, addr, length,
+						    lkey, &buf->vlan_tci);
+			else
+				mlx5_wqe_write(txq, wqe, addr, length, lkey);
 		}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 			sent_size += length;
@@ -665,17 +806,18 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 /**
  * Translate RX completion flags to packet type.
  *
- * @param flags
- *   RX completion flags returned by poll_length_flags().
+ * @param  cqe
+ *   The Pointer to the CQE
  *
  * @return
  *   Packet type for struct rte_mbuf.
  */
 static inline uint32_t
-rxq_cq_to_pkt_type(uint32_t flags)
+rxq_cq_to_pkt_type(volatile struct mlx5_cqe64 *cqe)
 {
 	uint32_t pkt_type;
 
+#if 0 /* Currently IBV_EXP_CQ_RX_TUNNEL_PACKET is not used. */
 	if (flags & IBV_EXP_CQ_RX_TUNNEL_PACKET)
 		pkt_type =
 			TRANSPOSE(flags,
@@ -691,24 +833,70 @@ rxq_cq_to_pkt_type(uint32_t flags)
 				  IBV_EXP_CQ_RX_IPV6_PACKET,
 				  RTE_PTYPE_INNER_L3_IPV6);
 	else
+#endif
 		pkt_type =
-			TRANSPOSE(flags,
-				  IBV_EXP_CQ_RX_IPV4_PACKET,
-				  RTE_PTYPE_L3_IPV4) |
-			TRANSPOSE(flags,
-				  IBV_EXP_CQ_RX_IPV6_PACKET,
-				  RTE_PTYPE_L3_IPV6);
+			TRANSPOSE(cqe->l4_hdr_type_etc,
+				  MLX5_CQE_L3_HDR_TYPE_IPV6,
+				  RTE_PTYPE_L3_IPV6) |
+			TRANSPOSE(cqe->l4_hdr_type_etc,
+				  MLX5_CQE_L3_HDR_TYPE_IPV4,
+				  RTE_PTYPE_L3_IPV4);
 	return pkt_type;
 }
 
+/**
+ * Translate RX completion flags to offload flags.
+ *
+ * @param  cqe
+ *   The Pointer to the CQE
+ *
+ * @return
+ *   Offload flags (ol_flags) for struct rte_mbuf.
+ */
+static inline uint32_t
+rxq_cq_to_ol_flags(volatile struct mlx5_cqe64 *cqe)
+{
+	uint32_t ol_flags = 0;
+	uint8_t l3_hdr = (cqe->l4_hdr_type_etc) & MLX5_CQE_L3_HDR_TYPE_MASK;
+	uint8_t l4_hdr = (cqe->l4_hdr_type_etc) & MLX5_CQE_L4_HDR_TYPE_MASK;
+
+	if ((l3_hdr == MLX5_CQE_L3_HDR_TYPE_IPV4) ||
+	    (l3_hdr == MLX5_CQE_L3_HDR_TYPE_IPV6))
+		ol_flags |=
+			(!(cqe->hds_ip_ext & MLX5_CQE_L3_OK) *
+			 PKT_RX_IP_CKSUM_BAD);
+
+	if ((l4_hdr == MLX5_CQE_L4_HDR_TYPE_TCP) ||
+	    (l4_hdr == MLX5_CQE_L4_HDR_TYPE_TCP_EMP_ACK) ||
+	    (l4_hdr == MLX5_CQE_L4_HDR_TYPE_TCP_ACK) ||
+	    (l4_hdr == MLX5_CQE_L4_HDR_TYPE_UDP))
+		ol_flags |=
+			(!(cqe->hds_ip_ext & MLX5_CQE_L4_OK) *
+			 PKT_RX_L4_CKSUM_BAD);
+#if 0 /* Currently IBV_EXP_CQ_RX_TUNNEL_PACKET is not used. */
+	/*
+	 * PKT_RX_IP_CKSUM_BAD and PKT_RX_L4_CKSUM_BAD are used in place
+	 * of PKT_RX_EIP_CKSUM_BAD because the latter is not functional
+	 * (its value is 0).
+	 */
+	if ((flags & IBV_EXP_CQ_RX_TUNNEL_PACKET) && (rxq->csum_l2tun))
+		ol_flags |=
+			TRANSPOSE(~flags,
+				  IBV_EXP_CQ_RX_OUTER_IP_CSUM_OK,
+				  PKT_RX_IP_CKSUM_BAD) |
+			TRANSPOSE(~flags,
+				  IBV_EXP_CQ_RX_OUTER_TCP_UDP_CSUM_OK,
+				  PKT_RX_L4_CKSUM_BAD);
+#endif
+	return ol_flags;
+}
+
 static inline int
-mlx5_rx_poll_len(struct frxq *rxq)
+mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
 {
 	int len = 0;
 	const unsigned int elts_n = 2 * rxq->elts_n;
 	const unsigned int cqe_n = elts_n - 1;
-	volatile union mlx5_rx_cqe *cqe =
-		(volatile union mlx5_rx_cqe *)&(*rxq->cqes)[rxq->cq_ci & cqe_n];
 
 	/* Process the compressed data present in the CQE and its mini arrays. */
 	if (likely(cqe->zip.comp_flag == 1)) {
@@ -818,10 +1006,12 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		struct rte_mbuf *pkt;
 		unsigned int len;
 		volatile struct mlx5_wqe_data_seg *wqe = &(*rxq->wqes)[idx & wqe_cnt];
+		volatile union mlx5_rx_cqe *cqe =
+			(volatile union mlx5_rx_cqe *)
+			&(*rxq->cqes)[rxq->cq_ci & wqe_cnt];
 
 		pkt = (*rxq->elts)[idx];
-		rte_prefetch0((void *)(uintptr_t)
-			      &(*rxq->cqes)[rxq->cq_ci & wqe_cnt]);
+		rte_prefetch0(cqe);
 		rep = __rte_mbuf_raw_alloc(rxq->mp);
 		if (unlikely(rep == NULL)) {
 			wqe->addr = htonll((uintptr_t)pkt->buf_addr +
@@ -833,7 +1023,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		NB_SEGS(rep) = 1;
 		PORT(rep) = rxq->port_id;
 		NEXT(rep) = NULL;
-		len = mlx5_rx_poll_len(rxq);
+		len = mlx5_rx_poll_len(rxq, cqe);
 		if (unlikely(len == 0)) {
 			if (rep)
 				__rte_mbuf_raw_free(rep);
@@ -848,7 +1038,14 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Update pkt information. */
 		PKT_LEN(pkt) = len;
 		DATA_LEN(pkt) = len;
-
+		if (rxq->csum | rxq->vlan_strip) {
+			pkt->packet_type = rxq_cq_to_pkt_type(&cqe->cqe64);
+			pkt->ol_flags = rxq_cq_to_ol_flags(&cqe->cqe64);
+			if (cqe->cqe64.l4_hdr_type_etc & MLX5_CQE_VLAN_STRIPPED) {
+				pkt->ol_flags |= PKT_RX_VLAN_PKT;
+				pkt->vlan_tci = ntohs(cqe->cqe64.vlan_info);
+			}
+		}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 		/* Increment bytes counter. */
 		rxq->stats.ibytes += len;
