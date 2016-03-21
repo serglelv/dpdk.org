@@ -1017,6 +1017,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	unsigned int i;
 	unsigned int elts_n = rxq->elts_n;
 	unsigned int wqe_cnt = elts_n - 1;
+	const unsigned int cqe_cnt = (2 *  elts_n) - 1;
 	uint16_t idx = rxq->idx;
 
 	for (i = 0; (i != pkts_n); ++i) {
@@ -1026,7 +1027,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		volatile struct mlx5_wqe_data_seg *wqe = &(*rxq->wqes)[idx & wqe_cnt];
 		volatile union mlx5_rx_cqe *cqe =
 			(volatile union mlx5_rx_cqe *)
-			&(*rxq->cqes)[rxq->cq_ci & wqe_cnt];
+			&(*rxq->cqes)[rxq->cq_ci & cqe_cnt];
 
 		pkt = (*rxq->elts)[idx];
 		rte_prefetch0(cqe);
