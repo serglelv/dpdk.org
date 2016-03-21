@@ -143,7 +143,7 @@ txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
 	/* Reset the owner bit in all CQE. */
 	while(cqe_cnt) {
 		cqe = &(*txq->cqes)[(*cq_ci) & cqe_n];
-		cqe->op_own = MLX5_CQE_INVALIDATE(0);
+		cqe->op_own = MLX5_CQE_INVALIDATE;
 		++(*cq_ci);
 		--cqe_cnt;
 	}
@@ -243,7 +243,7 @@ txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
 	/* Reset the owner bit in all CQE. */
 	while(cqe_cnt) {
 		cqe = &(*txq->cqes)[(*cq_ci) & cqe_n];
-		cqe->op_own = MLX5_CQE_INVALIDATE(0);
+		cqe->op_own = MLX5_CQE_INVALIDATE;
 		++(*cq_ci);
 		--cqe_cnt;
 	}
@@ -934,11 +934,10 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
 		if (unlikely(cqe->zip.scqe_idx == cqe->zip.cqe_cnt)) {
 			uint16_t idx = rxq->cq_ci;
 			uint16_t end = cqe->zip.cq_ci;
-			unsigned int log = log2above(elts_n);
 
 			while (idx != end) {
 				(*rxq->cqes)[idx & cqe_n].op_own =
-					MLX5_CQE_INVALIDATE((idx >> log) & 1);
+					MLX5_CQE_INVALIDATE;
 				++idx;
 			}
 			rxq->cq_ci = cqe->zip.cq_ci;

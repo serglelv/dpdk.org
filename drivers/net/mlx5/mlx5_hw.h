@@ -57,8 +57,7 @@
 #define MLX5_CQE_SE(op_own) (((op_own) >> 1) & 1)
 
 /* Invalidate a CQE. */
-#define MLX5_CQE_INVALIDATE(own) \
-	((MLX5_CQE_INVALID << 4) | (own & MLX5_CQE_OWNER_MASK))
+#define MLX5_CQE_INVALIDATE (MLX5_CQE_INVALID << 4)
 
 #define MLX5_CQE_VLAN_STRIPPED	0x1
 
