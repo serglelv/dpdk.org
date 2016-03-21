@@ -267,7 +267,7 @@ struct ftxq {
 	} mp2mr[MLX5_PMD_TX_MP_CACHE]; /* MP to MR translation table. */
 	struct rte_mbuf *(*elts)[];
 	struct mlx5_txq_stats stats; /* TX queue counters. */
-	uint16_t qp_num;
+	uint32_t qp_num_8s; /* QP number shifted by 8. */
 } __attribute__((aligned(64)));
 
 /* TX queue descriptor. */

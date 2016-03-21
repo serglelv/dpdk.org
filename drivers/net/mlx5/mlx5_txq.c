@@ -88,7 +88,7 @@ txq_alloc_elts(struct txq *txq, unsigned int elts_n)
 
 		memset((void *)(uintptr_t)wqe, 0, sizeof(struct mlx5_wqe64));
 		wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
-		wqe->ctrl.data[1] = htonl((txq->ftxq.qp_num << 8) | 4);
+		wqe->ctrl.data[1] = htonl(txq->ftxq.qp_num_8s | 4);
 		/* Store the completion request in the WQE. */
 		if (--comp == 0) {
 			wqe->ctrl.data[2] = htonl(8);
@@ -208,7 +208,7 @@ txq_ftxq_setup(struct txq *tmpl, struct txq *txq)
 		 MLX5_PMD_TX_PER_COMP_REQ : (elts_n / 4));
 	tmpl->ftxq.elts_comp_npr = elts_n / tmpl->ftxq.elts_comp_cd_init;
 
-	tmpl->ftxq.qp_num = qp->ctrl_seg.qp_num;
+	tmpl->ftxq.qp_num_8s = qp->ctrl_seg.qp_num << 8;
 	tmpl->ftxq.wqes =
 		(volatile struct mlx5_wqe64 (*)[])
 		(uintptr_t)qp->gen_data.sqstart;

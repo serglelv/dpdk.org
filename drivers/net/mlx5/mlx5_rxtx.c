@@ -460,7 +460,7 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	wqe->dseg.addr = htonll(addr);
 
 	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
-	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | 4);
+	wqe->ctrl.data[1] = htonl(txq->qp_num_8s | 4);
 	if (unlikely(--txq->elts_comp == 0)) {
 		wqe->ctrl.data[2] = htonl(8);
 		txq->elts_comp = txq->elts_comp_cd_init;
@@ -503,7 +503,7 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	wqe->dseg.addr = htonll(addr);
 
 	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
-	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | 4);
+	wqe->ctrl.data[1] = htonl(txq->qp_num_8s | 4);
 	if (unlikely(--txq->elts_comp == 0)) {
 		wqe->ctrl.data[2] = htonl(8);
 		txq->elts_comp = txq->elts_comp_cd_init;
@@ -560,7 +560,7 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	}
 
 	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
-	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | (size & 0x3f));
+	wqe->ctrl.data[1] = htonl(txq->qp_num_8s | (size & 0x3f));
 	if (unlikely(--txq->elts_comp == 0)) {
 		wqe->ctrl.data[2] = htonl(8);
 		txq->elts_comp = txq->elts_comp_cd_init;
@@ -629,7 +629,7 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	}
 
 	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
-	wqe->ctrl.data[1] = htonl((txq->qp_num << 8) | (size & 0x3f));
+	wqe->ctrl.data[1] = htonl(txq->qp_num_8s | (size & 0x3f));
 	if (unlikely(--txq->elts_comp == 0)) {
 		wqe->ctrl.data[2] = htonl(8);
 		txq->elts_comp = txq->elts_comp_cd_init;
