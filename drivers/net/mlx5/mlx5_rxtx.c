@@ -405,8 +405,8 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 static inline void
 mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-	       uintptr_t addr, uint32_t length, uint32_t lkey,
-	       uint16_t *vlan_tci)
+		    uintptr_t addr, uint32_t length, uint32_t lkey,
+		    uint16_t *vlan_tci)
 {
 	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
 
@@ -416,9 +416,15 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	 * Copy 4 bytes of vlan.
 	 * Copy 2 bytes of ether type.
 	 */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start, (void *)(uintptr_t)addr, 12);
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12), &vlan, sizeof(vlan));
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16), (void *)((uintptr_t)addr + 12), 2);
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       12);
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12),
+	       &vlan,
+	       sizeof(vlan));
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16),
+	       (void *)((uintptr_t)addr + 12),
+	       2);
 
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
@@ -468,8 +474,8 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 static inline void
 mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-	       uintptr_t addr, uint32_t length, uint32_t lkey,
-	       uint16_t *vlan_tci)
+		    uintptr_t addr, uint32_t length, uint32_t lkey,
+		    uint16_t *vlan_tci)
 {
 	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
 
@@ -479,9 +485,15 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	 * Copy 4 bytes of vlan.
 	 * Copy 2 bytes of ether type.
 	 */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start, (void *)(uintptr_t)addr, 12);
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12), &vlan, sizeof(vlan));
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16), (void *)((uintptr_t)addr + 12), 2);
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       12);
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12),
+	       &vlan,
+	       sizeof(vlan));
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16),
+	       (void *)((uintptr_t)addr + 12),
+	       2);
 
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
@@ -562,7 +574,7 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 static inline void
 mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-		      uintptr_t addr, uint32_t length, uint16_t *vlan_tci)
+			   uintptr_t addr, uint32_t length, uint16_t *vlan_tci)
 {
 	uint32_t size;
 	uint32_t wqes_cnt = 1;
@@ -576,9 +588,15 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	 * Copy 4 bytes of vlan.
 	 * Copy 2 bytes of ether type.
 	 */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start, (void *)(uintptr_t)addr, 12);
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12), &vlan, sizeof(vlan));
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16), (void *)((uintptr_t)addr + 12), 2);
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       12);
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12),
+	       &vlan,
+	       sizeof(vlan));
+	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16),
+	       (void *)((uintptr_t)addr + 12),
+	       2);
 
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
@@ -1041,7 +1059,8 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		if (rxq->csum | rxq->vlan_strip) {
 			pkt->packet_type = rxq_cq_to_pkt_type(&cqe->cqe64);
 			pkt->ol_flags = rxq_cq_to_ol_flags(&cqe->cqe64);
-			if (cqe->cqe64.l4_hdr_type_etc & MLX5_CQE_VLAN_STRIPPED) {
+			if (cqe->cqe64.l4_hdr_type_etc &
+			    MLX5_CQE_VLAN_STRIPPED) {
 				pkt->ol_flags |= PKT_RX_VLAN_PKT;
 				pkt->vlan_tci = ntohs(cqe->cqe64.vlan_info);
 			}
