@@ -152,7 +152,7 @@ priv_vlan_strip_queue_set(struct priv *priv, uint16_t idx, int on)
 	int err;
 
 	DEBUG("set VLAN offloads 0x%x for port %d queue %d",
-	      vlan_offloads, rxq->port_id, idx);
+	      vlan_offloads, frxq->port_id, idx);
 	mod = (struct ibv_exp_wq_attr){
 		.attr_mask = IBV_EXP_WQ_ATTR_VLAN_OFFLOADS,
 		.vlan_offloads = vlan_offloads,
