@@ -910,17 +910,18 @@ rxq_cq_to_ol_flags(volatile struct mlx5_cqe64 *cqe)
 }
 
 static inline int
-mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
+mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
+		 uint16_t cqe_cnt)
 {
+	uint16_t cqe_n = cqe_cnt + 1;
 	int len = 0;
-	const unsigned int elts_n = 2 * rxq->elts_n;
-	const unsigned int cqe_n = elts_n - 1;
 
 	/* Process the compressed data present in the CQE and its mini arrays. */
 	if (likely(cqe->zip.comp_flag == 1)) {
 		volatile struct mlx5_mini_cqe8 (*mc)[8] =
 			(volatile struct mlx5_mini_cqe8 (*)[8])
-			(uintptr_t)&(*rxq->cqes)[cqe->zip.cq_ci_carray & cqe_n];
+			(uintptr_t)&(*rxq->cqes)[cqe->zip.cq_ci_carray &
+						 cqe_cnt];
 
 		len = ntohl((*mc)[cqe->zip.scqe_idx & 7].byte_cnt);
 		if ((++cqe->zip.scqe_idx & 7) == 0) {
@@ -936,7 +937,7 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
 			uint16_t end = cqe->zip.cq_ci;
 
 			while (idx != end) {
-				(*rxq->cqes)[idx & cqe_n].op_own =
+				(*rxq->cqes)[idx & cqe_cnt].op_own =
 					MLX5_CQE_INVALIDATE;
 				++idx;
 			}
@@ -948,7 +949,7 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
 		int ret;
 		int8_t op_own;
 
-		ret = check_cqe64(&cqe->cqe64, elts_n, rxq->cq_ci);
+		ret = check_cqe64(&cqe->cqe64, cqe_n, rxq->cq_ci);
 		if (unlikely(ret == 1))
 			return 0;
 		++rxq->cq_ci;
@@ -957,7 +958,8 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
 		if (MLX5_CQE_FORMAT(op_own) == MLX5_COMPRESSED) {
 			volatile struct mlx5_mini_cqe8 (*mc)[8] =
 				(volatile struct mlx5_mini_cqe8 (*)[8])
-				(uintptr_t)&(*rxq->cqes)[rxq->cq_ci & cqe_n];
+				(uintptr_t)&(*rxq->cqes)[rxq->cq_ci &
+							 cqe_cnt];
 
 			/* Update big endian fields to little endian ones. */
 			cqe->zip.cqe_cnt = ntohl(cqe->cqe64.byte_cnt);
@@ -973,7 +975,7 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe)
 			 * position.  It is a special case, after this one,
 			 * the next mini array will 8 CQEs after.
 			 */
-			cqe->zip.cq_ci_carray = rxq->cq_ci & cqe_n;
+			cqe->zip.cq_ci_carray = rxq->cq_ci & cqe_cnt;
 			cqe->zip.cq_ci_narray = cqe->zip.cq_ci_carray + 7;
 
 			/* Compute the next non compressed CQE. */
@@ -1016,7 +1018,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	unsigned int i;
 	unsigned int elts_n = rxq->elts_n;
 	unsigned int wqe_cnt = elts_n - 1;
-	const unsigned int cqe_cnt = (2 *  elts_n) - 1;
+	const unsigned int cqe_cnt = rxq->cqe_cnt;
 	uint16_t idx = rxq->idx;
 
 	for (i = 0; (i != pkts_n); ++i) {
@@ -1041,7 +1043,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		NB_SEGS(rep) = 1;
 		PORT(rep) = rxq->port_id;
 		NEXT(rep) = NULL;
-		len = mlx5_rx_poll_len(rxq, cqe);
+		len = mlx5_rx_poll_len(rxq, cqe, cqe_cnt);
 		if (unlikely(len == 0)) {
 			if (rep)
 				__rte_mbuf_raw_free(rep);

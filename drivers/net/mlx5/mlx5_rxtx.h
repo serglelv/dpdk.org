@@ -92,10 +92,11 @@ struct priv;
 
 /* RX queue descriptor. */
 struct frxq {
-	unsigned int idx;
+	uint16_t idx;
 	uint16_t rq_ci;
 	uint16_t cq_ci;
 	uint16_t elts_n;
+	uint16_t cqe_cnt;
 	uint16_t port_id;
 	unsigned int csum:1; /* Enable checksum offloading. */
 	unsigned int vlan_strip:1; /* Enable VLAN stripping. */

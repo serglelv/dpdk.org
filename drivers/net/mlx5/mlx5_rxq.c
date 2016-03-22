@@ -879,6 +879,7 @@ rxq_frxq_setup(struct rxq *tmpl, struct rxq *rxq)
 	struct mlx5_rwq *rwq = container_of(tmpl->wq, struct mlx5_rwq, wq);
 
 	tmpl->frxq.rq_db = rwq->rq.db;
+	tmpl->frxq.cqe_cnt = ibcq->cqe;
 	tmpl->frxq.cq_ci = 0;
 	tmpl->frxq.rq_ci = 0;
 	tmpl->frxq.cq_db = cq->dbrec;
