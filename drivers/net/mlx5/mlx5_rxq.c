@@ -1009,20 +1009,32 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 				  0),
 	};
 
+	/* By default, FCS (CRC) is stripped by hardware. */
+	if (dev->data->dev_conf.rxmode.hw_strip_crc) {
+		tmpl.frxq.crc_present = 0;
+	} else if (priv->hw_fcs_strip) {
+		/* Ask HW/Verbs to leave CRC in place when supported. */
+		attr.wq.flags |= IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
+		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
+		tmpl.frxq.crc_present = 1;
+	} else {
+		WARN("%p: CRC stripping has been disabled but will still"
+		     " be performed by hardware, make sure MLNX_OFED and"
+		     " firmware are up to date",
+		     (void *)dev);
+		tmpl.frxq.crc_present = 0;
+	}
+	DEBUG("%p: CRC stripping is %s, %u bytes will be subtracted from"
+	      " incoming frames to hide it",
+	      (void *)dev,
+	      tmpl.frxq.crc_present ? "disabled" : "enabled",
+	      tmpl.frxq.crc_present << 2);
+
 #ifdef HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING
 	if (mlx5_getenv_int("MLX5_PMD_ENABLE_PADDING")) {
 		INFO("%p: packet padding is enabled on queue %p",
 		     (void *)dev, (void *)rxq);
 		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING;
-		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
-	}
-#endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */
-
-#ifdef HAVE_EXP_CREATE_WQ_FLAG_FCS_SUPPORT
-	if (!dev->data->dev_conf.rxmode.hw_strip_crc) {
-		INFO("%p: FCS stripping is disabled on queue %p",
-		      (void *)dev, (void *)rxq);
-		attr.wq.flags = IBV_EXP_CREATE_WQ_FLAG_SCATTER_FCS;
 		attr.wq.comp_mask |= IBV_EXP_CREATE_WQ_FLAGS;
 	}
 #endif /* HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING */

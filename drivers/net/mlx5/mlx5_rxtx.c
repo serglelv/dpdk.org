@@ -1047,6 +1047,8 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 				__rte_mbuf_raw_free(rep);
 			break;
 		}
+		assert(len >= (unsigned int)(rxq->crc_present << 2));
+		len -= (rxq->crc_present << 2);
 		/* Fill NIC descriptor with the new buffer.  The lkey and size
 		 * of the buffers are already known, only the buffer address
 		 * changes. */
