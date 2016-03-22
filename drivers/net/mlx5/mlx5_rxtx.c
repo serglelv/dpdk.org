@@ -1048,7 +1048,6 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			break;
 		}
 		assert(len >= (unsigned int)(rxq->crc_present << 2));
-		len -= (rxq->crc_present << 2);
 		/* Fill NIC descriptor with the new buffer.  The lkey and size
 		 * of the buffers are already known, only the buffer address
 		 * changes. */
@@ -1056,17 +1055,23 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 				   RTE_PKTMBUF_HEADROOM);
 		(*rxq->elts)[idx] = rep;
 		/* Update pkt information. */
-		PKT_LEN(pkt) = len;
-		DATA_LEN(pkt) = len;
-		if (rxq->csum | rxq->vlan_strip) {
-			pkt->packet_type = rxq_cq_to_pkt_type(&cqe->cqe64);
-			pkt->ol_flags = rxq_cq_to_ol_flags(&cqe->cqe64);
+		if (rxq->csum | rxq->vlan_strip | rxq->crc_present) {
+			if (rxq->csum) {
+				pkt->packet_type =
+					rxq_cq_to_pkt_type(&cqe->cqe64);
+				pkt->ol_flags =
+					rxq_cq_to_ol_flags(&cqe->cqe64);
+			}
 			if (cqe->cqe64.l4_hdr_type_etc &
 			    MLX5_CQE_VLAN_STRIPPED) {
 				pkt->ol_flags |= PKT_RX_VLAN_PKT;
 				pkt->vlan_tci = ntohs(cqe->cqe64.vlan_info);
 			}
+			if (rxq->crc_present)
+				len -= CRC_SIZE;
 		}
+		PKT_LEN(pkt) = len;
+		DATA_LEN(pkt) = len;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 		/* Increment bytes counter. */
 		rxq->stats.ibytes += len;

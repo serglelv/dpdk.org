@@ -57,6 +57,9 @@
 /* TX Completion Queue size. */
 #define MLX5_TX_CQ_SIZE 16
 
+/* size of CRC to be stripped */
+#define CRC_SIZE 4
+
 /* Maximum size for inline data. */
 #ifndef MLX5_PMD_MAX_INLINE
 #define MLX5_PMD_MAX_INLINE 0
