@@ -82,6 +82,154 @@ struct mlx5_fdir_filter {
 LIST_HEAD(fdir_filter_list, mlx5_fdir_filter);
 
 /**
+ * Convert struct rte_eth_fdir_filter to mlx5 filter descriptor.
+ *
+ * @param[in] fdir_filter
+ *   DPDK filter structure to convert.
+ * @param[out] desc
+ *   Resulting mlx5 filter descriptor.
+ * @param mode
+ *   Flow director mode.
+ */
+static void
+fdir_filter_to_flow_desc(const struct rte_eth_fdir_filter *fdir_filter,
+			 struct fdir_flow_desc *desc, enum rte_fdir_mode mode)
+{
+	/* Initialize descriptor. */
+	memset(desc, 0, sizeof(*desc));
+
+	/* Set VLAN ID. */
+	desc->vlan_tag = fdir_filter->input.flow_ext.vlan_tci;
+
+	/* Set MAC address. */
+	if (mode == RTE_FDIR_MODE_PERFECT_MAC_VLAN) {
+		rte_memcpy(desc->mac,
+			   fdir_filter->input.flow.mac_vlan_flow.mac_addr.
+				addr_bytes,
+			   sizeof(desc->mac));
+		desc->type = HASH_RXQ_ETH;
+		return;
+	}
+
+	/* Set mode */
+	switch (fdir_filter->input.flow_type) {
+	case RTE_ETH_FLOW_NONFRAG_IPV4_UDP:
+		desc->type = HASH_RXQ_UDPV4;
+		break;
+	case RTE_ETH_FLOW_NONFRAG_IPV4_TCP:
+		desc->type = HASH_RXQ_TCPV4;
+		break;
+	case RTE_ETH_FLOW_NONFRAG_IPV4_OTHER:
+		desc->type = HASH_RXQ_IPV4;
+		break;
+#ifdef HAVE_FLOW_SPEC_IPV6
+	case RTE_ETH_FLOW_NONFRAG_IPV6_UDP:
+		desc->type = HASH_RXQ_UDPV6;
+		break;
+	case RTE_ETH_FLOW_NONFRAG_IPV6_TCP:
+		desc->type = HASH_RXQ_TCPV6;
+		break;
+	case RTE_ETH_FLOW_NONFRAG_IPV6_OTHER:
+		desc->type = HASH_RXQ_IPV6;
+		break;
+#endif /* HAVE_FLOW_SPEC_IPV6 */
+	default:
+		break;
+	}
+
+	/* Set flow values */
+	switch (fdir_filter->input.flow_type) {
+	case RTE_ETH_FLOW_NONFRAG_IPV4_UDP:
+	case RTE_ETH_FLOW_NONFRAG_IPV4_TCP:
+		desc->src_port = fdir_filter->input.flow.udp4_flow.src_port;
+		desc->dst_port = fdir_filter->input.flow.udp4_flow.dst_port;
+	case RTE_ETH_FLOW_NONFRAG_IPV4_OTHER:
+		desc->src_ip[0] = fdir_filter->input.flow.ip4_flow.src_ip;
+		desc->dst_ip[0] = fdir_filter->input.flow.ip4_flow.dst_ip;
+		break;
+#ifdef HAVE_FLOW_SPEC_IPV6
+	case RTE_ETH_FLOW_NONFRAG_IPV6_UDP:
+	case RTE_ETH_FLOW_NONFRAG_IPV6_TCP:
+		desc->src_port = fdir_filter->input.flow.udp6_flow.src_port;
+		desc->dst_port = fdir_filter->input.flow.udp6_flow.dst_port;
+		/* Fall through. */
+	case RTE_ETH_FLOW_NONFRAG_IPV6_OTHER:
+		rte_memcpy(desc->src_ip,
+			   fdir_filter->input.flow.ipv6_flow.src_ip,
+			   sizeof(desc->src_ip));
+		rte_memcpy(desc->dst_ip,
+			   fdir_filter->input.flow.ipv6_flow.dst_ip,
+			   sizeof(desc->dst_ip));
+		break;
+#endif /* HAVE_FLOW_SPEC_IPV6 */
+	default:
+		break;
+	}
+}
+
+/**
+ * Check if two flow descriptors overlap according to configured mask.
+ *
+ * @param priv
+ *   Private structure that provides flow director mask.
+ * @param desc1
+ *   First flow descriptor to compare.
+ * @param desc2
+ *   Second flow descriptor to compare.
+ *
+ * @return
+ *   Nonzero if descriptors overlap.
+ */
+static int
+priv_fdir_overlap(const struct priv *priv,
+		  const struct fdir_flow_desc *desc1,
+		  const struct fdir_flow_desc *desc2)
+{
+	const struct rte_eth_fdir_masks *mask =
+		&priv->dev->data->dev_conf.fdir_conf.mask;
+	unsigned int i;
+
+	if (desc1->type != desc2->type)
+		return 0;
+	/* Ignore non masked bits. */
+	for (i = 0; i != RTE_DIM(desc1->mac); ++i)
+		if ((desc1->mac[i] & mask->mac_addr_byte_mask) !=
+		    (desc2->mac[i] & mask->mac_addr_byte_mask))
+			return 0;
+	if (((desc1->src_port & mask->src_port_mask) !=
+	     (desc2->src_port & mask->src_port_mask)) ||
+	    ((desc1->dst_port & mask->dst_port_mask) !=
+	     (desc2->dst_port & mask->dst_port_mask)))
+		return 0;
+	switch (desc1->type) {
+	case HASH_RXQ_IPV4:
+	case HASH_RXQ_UDPV4:
+	case HASH_RXQ_TCPV4:
+		if (((desc1->src_ip[0] & mask->ipv4_mask.src_ip) !=
+		     (desc2->src_ip[0] & mask->ipv4_mask.src_ip)) ||
+		    ((desc1->dst_ip[0] & mask->ipv4_mask.dst_ip) !=
+		     (desc2->dst_ip[0] & mask->ipv4_mask.dst_ip)))
+			return 0;
+		break;
+#ifdef HAVE_FLOW_SPEC_IPV6
+	case HASH_RXQ_IPV6:
+	case HASH_RXQ_UDPV6:
+	case HASH_RXQ_TCPV6:
+		for (i = 0; i != RTE_DIM(desc1->src_ip); ++i)
+			if (((desc1->src_ip[i] & mask->ipv6_mask.src_ip[i]) !=
+			     (desc2->src_ip[i] & mask->ipv6_mask.src_ip[i])) ||
+			    ((desc1->dst_ip[i] & mask->ipv6_mask.dst_ip[i]) !=
+			     (desc2->dst_ip[i] & mask->ipv6_mask.dst_ip[i])))
+				return 0;
+		break;
+#endif /* HAVE_FLOW_SPEC_IPV6 */
+	default:
+		break;
+	}
+	return 1;
+}
+
+/**
  * Create flow director steering rule for a specific filter.
  *
  * @param priv
@@ -101,8 +249,10 @@ priv_fdir_flow_add(struct priv *priv,
 {
 	struct ibv_exp_flow *flow;
 	struct fdir_flow_desc *desc = &mlx5_fdir_filter->desc;
-	enum rte_fdir_mode fdir_mode = priv->dev->data->dev_conf.fdir_conf.mode;
-	struct rte_eth_fdir_masks *mask = &priv->dev->data->dev_conf.fdir_conf.mask;
+	enum rte_fdir_mode fdir_mode =
+		priv->dev->data->dev_conf.fdir_conf.mode;
+	struct rte_eth_fdir_masks *mask =
+		&priv->dev->data->dev_conf.fdir_conf.mask;
 	FLOW_ATTR_SPEC_ETH(data, priv_flow_attr(priv, NULL, 0, desc->type));
 	struct ibv_exp_flow_attr *attr = &data->attr;
 	uintptr_t spec_offset = (uintptr_t)&data->spec;
@@ -112,7 +262,18 @@ priv_fdir_flow_add(struct priv *priv,
 	struct ibv_exp_flow_spec_ipv6 *spec_ipv6;
 #endif /* HAVE_FLOW_SPEC_IPV6 */
 	struct ibv_exp_flow_spec_tcp_udp *spec_tcp_udp;
+	struct mlx5_fdir_filter *iter_fdir_filter;
 	unsigned int i;
+
+	/* Abort if an existing flow overlaps this one to avoid packet
+	 * duplication, even if it targets another queue. */
+	LIST_FOREACH(iter_fdir_filter, priv->fdir_filter_list, next)
+		if ((iter_fdir_filter != mlx5_fdir_filter) &&
+		    (iter_fdir_filter->flow != NULL) &&
+		    (priv_fdir_overlap(priv,
+				       &mlx5_fdir_filter->desc,
+				       &iter_fdir_filter->desc)))
+			return EEXIST;
 
 	/*
 	 * No padding must be inserted by the compiler between attr and spec.
@@ -129,7 +290,7 @@ priv_fdir_flow_add(struct priv *priv,
 	assert(spec_eth->size == sizeof(*spec_eth));
 
 	/* VLAN ID */
-	spec_eth->val.vlan_tag = desc->vlan_tag;
+	spec_eth->val.vlan_tag = desc->vlan_tag & mask->vlan_tci_mask;
 	spec_eth->mask.vlan_tag = mask->vlan_tci_mask;
 
 	/* Update priority */
@@ -137,13 +298,11 @@ priv_fdir_flow_add(struct priv *priv,
 
 	if (fdir_mode == RTE_FDIR_MODE_PERFECT_MAC_VLAN) {
 		/* MAC Address */
-		rte_memcpy(spec_eth->val.dst_mac,
-			   desc->mac,
-			   sizeof(spec_eth->val.dst_mac));
-		/* The mask is per byte mask */
-		for (i = 0; i < sizeof(spec_eth->mask.dst_mac); i++)
+		for (i = 0; i != RTE_DIM(spec_eth->mask.dst_mac); ++i) {
+			spec_eth->val.dst_mac[i] =
+				desc->mac[i] & mask->mac_addr_byte_mask;
 			spec_eth->mask.dst_mac[i] = mask->mac_addr_byte_mask;
-
+		}
 		goto create_flow;
 	}
 
@@ -160,8 +319,10 @@ priv_fdir_flow_add(struct priv *priv,
 		assert(spec_ipv4->type == IBV_EXP_FLOW_SPEC_IPV4);
 		assert(spec_ipv4->size == sizeof(*spec_ipv4));
 
-		spec_ipv4->val.src_ip = desc->src_ip[0];
-		spec_ipv4->val.dst_ip = desc->dst_ip[0];
+		spec_ipv4->val.src_ip =
+			desc->src_ip[0] & mask->ipv4_mask.src_ip;
+		spec_ipv4->val.dst_ip =
+			desc->dst_ip[0] & mask->ipv4_mask.dst_ip;
 		spec_ipv4->mask.src_ip = mask->ipv4_mask.src_ip;
 		spec_ipv4->mask.dst_ip = mask->ipv4_mask.dst_ip;
 
@@ -186,12 +347,12 @@ priv_fdir_flow_add(struct priv *priv,
 		assert(spec_ipv6->type == IBV_EXP_FLOW_SPEC_IPV6);
 		assert(spec_ipv6->size == sizeof(*spec_ipv6));
 
-		rte_memcpy(spec_ipv6->val.src_ip,
-			   desc->src_ip,
-			   sizeof(spec_ipv6->val.src_ip));
-		rte_memcpy(spec_ipv6->val.dst_ip,
-			   desc->dst_ip,
-			   sizeof(spec_ipv6->val.dst_ip));
+		for (i = 0; i != RTE_DIM(desc->src_ip); ++i) {
+			((uint32_t *)spec_ipv6->val.src_ip)[i] =
+				desc->src_ip[i] & mask->ipv6_mask.src_ip[i];
+			((uint32_t *)spec_ipv6->val.dst_ip)[i] =
+				desc->dst_ip[i] & mask->ipv6_mask.dst_ip[i];
+		}
 		rte_memcpy(spec_ipv6->mask.src_ip,
 			   mask->ipv6_mask.src_ip,
 			   sizeof(spec_ipv6->mask.src_ip));
@@ -221,8 +382,8 @@ priv_fdir_flow_add(struct priv *priv,
 	       spec_tcp_udp->type == IBV_EXP_FLOW_SPEC_UDP);
 	assert(spec_tcp_udp->size == sizeof(*spec_tcp_udp));
 
-	spec_tcp_udp->val.src_port = desc->src_port;
-	spec_tcp_udp->val.dst_port = desc->dst_port;
+	spec_tcp_udp->val.src_port = desc->src_port & mask->src_port_mask;
+	spec_tcp_udp->val.dst_port = desc->dst_port & mask->dst_port_mask;
 	spec_tcp_udp->mask.src_port = mask->src_port_mask;
 	spec_tcp_udp->mask.dst_port = mask->dst_port_mask;
 
@@ -402,6 +563,29 @@ fdir_init_filters_list(struct priv *priv)
 }
 
 /**
+ * Flush all filters.
+ *
+ * @param priv
+ *   Private structure.
+ */
+static void
+priv_fdir_filter_flush(struct priv *priv)
+{
+	struct mlx5_fdir_filter *mlx5_fdir_filter;
+
+	while ((mlx5_fdir_filter = LIST_FIRST(priv->fdir_filter_list))) {
+		struct ibv_exp_flow *flow = mlx5_fdir_filter->flow;
+
+		DEBUG("%p: flushing flow director filter %p",
+		      (void *)priv, (void *)mlx5_fdir_filter);
+		LIST_REMOVE(mlx5_fdir_filter, next);
+		if (flow != NULL)
+			claim_zero(ibv_exp_destroy_flow(flow));
+		rte_free(mlx5_fdir_filter);
+	}
+}
+
+/**
  * Remove all flow director filters and delete list.
  *
  * @param priv
@@ -410,30 +594,7 @@ fdir_init_filters_list(struct priv *priv)
 void
 priv_fdir_delete_filters_list(struct priv *priv)
 {
-	struct mlx5_fdir_filter *mlx5_fdir_filter;
-	void *prev = NULL;
-
-	/* Run on every fdir filter and delete it */
-	LIST_FOREACH(mlx5_fdir_filter, priv->fdir_filter_list, next) {
-		/* Deallocate previous element safely. */
-		rte_free(prev);
-
-		/* Only valid elements should be in the list. */
-		assert(mlx5_fdir_filter != NULL);
-
-		/* Remove element from list. */
-		LIST_REMOVE(mlx5_fdir_filter, next);
-
-		/* Destroy flow handle. */
-		if (mlx5_fdir_filter->flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(mlx5_fdir_filter->flow));
-			mlx5_fdir_filter->flow = NULL;
-		}
-
-		prev = mlx5_fdir_filter;
-	}
-
-	rte_free(prev);
+	priv_fdir_filter_flush(priv);
 	rte_free(priv->fdir_filter_list);
 	priv->fdir_filter_list = NULL;
 }
@@ -453,12 +614,15 @@ priv_fdir_disable(struct priv *priv)
 
 	/* Run on every flow director filter and destroy flow handle. */
 	LIST_FOREACH(mlx5_fdir_filter, priv->fdir_filter_list, next) {
+		struct ibv_exp_flow *flow;
+
 		/* Only valid elements should be in the list */
 		assert(mlx5_fdir_filter != NULL);
+		flow = mlx5_fdir_filter->flow;
 
 		/* Destroy flow handle */
-		if (mlx5_fdir_filter->flow != NULL) {
-			claim_zero(ibv_exp_destroy_flow(mlx5_fdir_filter->flow));
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
 			mlx5_fdir_filter->flow = NULL;
 		}
 	}
@@ -467,7 +631,6 @@ priv_fdir_disable(struct priv *priv)
 	 * indirection table. */
 	for (i = 0; (i != priv->rxqs_n); i++) {
 		struct rxq *rxq = container_of((*priv->rxqs)[i], struct rxq, frxq);
-
 		fdir_queue = &rxq->fdir_queue;
 
 		if (fdir_queue->qp != NULL) {
@@ -476,7 +639,8 @@ priv_fdir_disable(struct priv *priv)
 		}
 
 		if (fdir_queue->ind_table != NULL) {
-			claim_zero(ibv_exp_destroy_rwq_ind_table(fdir_queue->ind_table));
+			claim_zero(ibv_exp_destroy_rwq_ind_table
+				   (fdir_queue->ind_table));
 			fdir_queue->ind_table = NULL;
 		}
 	}
@@ -500,4 +664,319 @@ priv_fdir_enable(struct priv *priv)
 
 		priv_fdir_filter_enable(priv, mlx5_fdir_filter);
 	}
+}
+
+/**
+ * Find specific filter in list.
+ *
+ * @param priv
+ *   Private structure.
+ * @param fdir_filter
+ *   Flow director filter to find.
+ *
+ * @return
+ *   Filter element if found, otherwise NULL.
+ */
+static struct mlx5_fdir_filter *
+priv_find_filter_in_list(struct priv *priv,
+			 const struct rte_eth_fdir_filter *fdir_filter)
+{
+	struct fdir_flow_desc desc;
+	struct mlx5_fdir_filter *mlx5_fdir_filter;
+	enum rte_fdir_mode fdir_mode = priv->dev->data->dev_conf.fdir_conf.mode;
+
+	/* Get flow director filter to look for. */
+	fdir_filter_to_flow_desc(fdir_filter, &desc, fdir_mode);
+
+	/* Look for the requested element. */
+	LIST_FOREACH(mlx5_fdir_filter, priv->fdir_filter_list, next) {
+		/* Only valid elements should be in the list. */
+		assert(mlx5_fdir_filter != NULL);
+
+		/* Return matching filter. */
+		if (!memcmp(&desc, &mlx5_fdir_filter->desc, sizeof(desc)))
+			return mlx5_fdir_filter;
+	}
+
+	/* Filter not found */
+	return NULL;
+}
+
+/**
+ * Add new flow director filter and store it in list.
+ *
+ * @param priv
+ *   Private structure.
+ * @param fdir_filter
+ *   Flow director filter to add.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_fdir_filter_add(struct priv *priv,
+		     const struct rte_eth_fdir_filter *fdir_filter)
+{
+	struct mlx5_fdir_filter *mlx5_fdir_filter;
+	enum rte_fdir_mode fdir_mode = priv->dev->data->dev_conf.fdir_conf.mode;
+	int err = 0;
+
+	/* Validate queue number. */
+	if (fdir_filter->action.rx_queue >= priv->rxqs_n) {
+		ERROR("invalid queue number %d", fdir_filter->action.rx_queue);
+		return EINVAL;
+	}
+
+	/* Duplicate filters are currently unsupported. */
+	mlx5_fdir_filter = priv_find_filter_in_list(priv, fdir_filter);
+	if (mlx5_fdir_filter != NULL) {
+		ERROR("filter already exists");
+		return EINVAL;
+	}
+
+	/* Create new flow director filter. */
+	mlx5_fdir_filter =
+		rte_calloc(__func__, 1, sizeof(*mlx5_fdir_filter), 0);
+	if (mlx5_fdir_filter == NULL) {
+		err = ENOMEM;
+		ERROR("cannot allocate flow director filter: %s",
+		      strerror(err));
+		return err;
+	}
+
+	/* Set queue. */
+	mlx5_fdir_filter->queue = fdir_filter->action.rx_queue;
+
+	/* Convert to mlx5 filter descriptor. */
+	fdir_filter_to_flow_desc(fdir_filter,
+				 &mlx5_fdir_filter->desc, fdir_mode);
+
+	/* Insert new filter into list. */
+	LIST_INSERT_HEAD(priv->fdir_filter_list, mlx5_fdir_filter, next);
+
+	DEBUG("%p: flow director filter %p added",
+	      (void *)priv, (void *)mlx5_fdir_filter);
+
+	/* Enable filter immediately if device is started. */
+	if (priv->started)
+		err = priv_fdir_filter_enable(priv, mlx5_fdir_filter);
+
+	return err;
+}
+
+/**
+ * Update queue for specific filter.
+ *
+ * @param priv
+ *   Private structure.
+ * @param fdir_filter
+ *   Filter to be updated.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_fdir_filter_update(struct priv *priv,
+			const struct rte_eth_fdir_filter *fdir_filter)
+{
+	struct mlx5_fdir_filter *mlx5_fdir_filter;
+
+	/* Validate queue number. */
+	if (fdir_filter->action.rx_queue >= priv->rxqs_n) {
+		ERROR("invalid queue number %d", fdir_filter->action.rx_queue);
+		return EINVAL;
+	}
+
+	mlx5_fdir_filter = priv_find_filter_in_list(priv, fdir_filter);
+	if (mlx5_fdir_filter != NULL) {
+		struct ibv_exp_flow *flow = mlx5_fdir_filter->flow;
+		int err = 0;
+
+		/* Update queue number. */
+		mlx5_fdir_filter->queue = fdir_filter->action.rx_queue;
+
+		/* Destroy flow handle. */
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
+			mlx5_fdir_filter->flow = NULL;
+		}
+		DEBUG("%p: flow director filter %p updated",
+		      (void *)priv, (void *)mlx5_fdir_filter);
+
+		/* Enable filter if device is started. */
+		if (priv->started)
+			err = priv_fdir_filter_enable(priv, mlx5_fdir_filter);
+
+		return err;
+	}
+
+	/* Filter not found, create it. */
+	DEBUG("%p: filter not found for update, creating new filter",
+	      (void *)priv);
+	return priv_fdir_filter_add(priv, fdir_filter);
+}
+
+/**
+ * Delete specific filter.
+ *
+ * @param priv
+ *   Private structure.
+ * @param fdir_filter
+ *   Filter to be deleted.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_fdir_filter_delete(struct priv *priv,
+			const struct rte_eth_fdir_filter *fdir_filter)
+{
+	struct mlx5_fdir_filter *mlx5_fdir_filter;
+
+	mlx5_fdir_filter = priv_find_filter_in_list(priv, fdir_filter);
+	if (mlx5_fdir_filter != NULL) {
+		struct ibv_exp_flow *flow = mlx5_fdir_filter->flow;
+
+		/* Remove element from list. */
+		LIST_REMOVE(mlx5_fdir_filter, next);
+
+		/* Destroy flow handle. */
+		if (flow != NULL) {
+			claim_zero(ibv_exp_destroy_flow(flow));
+			mlx5_fdir_filter->flow = NULL;
+		}
+
+		DEBUG("%p: flow director filter %p deleted",
+		      (void *)priv, (void *)mlx5_fdir_filter);
+
+		/* Delete filter. */
+		rte_free(mlx5_fdir_filter);
+
+		return 0;
+	}
+
+	ERROR("%p: flow director delete failed, cannot find filter",
+	      (void *)priv);
+	return EINVAL;
+}
+
+/**
+ * Get flow director information.
+ *
+ * @param priv
+ *   Private structure.
+ * @param[out] fdir_info
+ *   Resulting flow director information.
+ */
+static void
+priv_fdir_info_get(struct priv *priv, struct rte_eth_fdir_info *fdir_info)
+{
+	struct rte_eth_fdir_masks *mask =
+		&priv->dev->data->dev_conf.fdir_conf.mask;
+
+	fdir_info->mode = priv->dev->data->dev_conf.fdir_conf.mode;
+	fdir_info->guarant_spc = 0;
+
+	rte_memcpy(&fdir_info->mask, mask, sizeof(fdir_info->mask));
+
+	fdir_info->max_flexpayload = 0;
+	fdir_info->flow_types_mask[0] = 0;
+
+	fdir_info->flex_payload_unit = 0;
+	fdir_info->max_flex_payload_segment_num = 0;
+	fdir_info->flex_payload_limit = 0;
+	memset(&fdir_info->flex_conf, 0, sizeof(fdir_info->flex_conf));
+}
+
+/**
+ * Deal with flow director operations.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ * @param filter_op
+ *   Operation to perform.
+ * @param arg
+ *   Pointer to operation-specific structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+priv_fdir_ctrl_func(struct priv *priv, enum rte_filter_op filter_op, void *arg)
+{
+	enum rte_fdir_mode fdir_mode =
+		priv->dev->data->dev_conf.fdir_conf.mode;
+	int ret = 0;
+
+	if (filter_op == RTE_ETH_FILTER_NOP)
+		return 0;
+
+	if (fdir_mode != RTE_FDIR_MODE_PERFECT &&
+	    fdir_mode != RTE_FDIR_MODE_PERFECT_MAC_VLAN) {
+		ERROR("%p: flow director mode %d not supported",
+		      (void *)priv, fdir_mode);
+		return EINVAL;
+	}
+
+	switch (filter_op) {
+	case RTE_ETH_FILTER_ADD:
+		ret = priv_fdir_filter_add(priv, arg);
+		break;
+	case RTE_ETH_FILTER_UPDATE:
+		ret = priv_fdir_filter_update(priv, arg);
+		break;
+	case RTE_ETH_FILTER_DELETE:
+		ret = priv_fdir_filter_delete(priv, arg);
+		break;
+	case RTE_ETH_FILTER_FLUSH:
+		priv_fdir_filter_flush(priv);
+		break;
+	case RTE_ETH_FILTER_INFO:
+		priv_fdir_info_get(priv, arg);
+		break;
+	default:
+		DEBUG("%p: unknown operation %u", (void *)priv, filter_op);
+		ret = EINVAL;
+		break;
+	}
+	return ret;
+}
+
+/**
+ * Manage filter operations.
+ *
+ * @param dev
+ *   Pointer to Ethernet device structure.
+ * @param filter_type
+ *   Filter type.
+ * @param filter_op
+ *   Operation to perform.
+ * @param arg
+ *   Pointer to operation-specific structure.
+ *
+ * @return
+ *   0 on success, negative errno value on failure.
+ */
+int
+mlx5_dev_filter_ctrl(struct rte_eth_dev *dev,
+		     enum rte_filter_type filter_type,
+		     enum rte_filter_op filter_op,
+		     void *arg)
+{
+	int ret = -EINVAL;
+	struct priv *priv = dev->data->dev_private;
+
+	switch (filter_type) {
+	case RTE_ETH_FILTER_FDIR:
+		priv_lock(priv);
+		ret = priv_fdir_ctrl_func(priv, filter_op, arg);
+		priv_unlock(priv);
+		break;
+	default:
+		ERROR("%p: filter type (%d) not supported",
+		      (void *)dev, filter_type);
+		break;
+	}
+
+	return ret;
 }

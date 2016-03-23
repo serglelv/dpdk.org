@@ -198,6 +198,7 @@ static const struct eth_dev_ops mlx5_dev_ops = {
 	.rss_hash_conf_get = mlx5_rss_hash_conf_get,
 	.vlan_strip_queue_set = mlx5_vlan_strip_queue_set,
 	.vlan_offload_set = mlx5_vlan_offload_set,
+	.filter_ctrl = mlx5_dev_filter_ctrl,
 };
 
 static struct {

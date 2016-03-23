@@ -245,7 +245,7 @@ priv_flow_attr(struct priv *priv, struct ibv_exp_flow_attr *flow_attr,
 	init = &hash_rxq_init[type];
 	*flow_attr = (struct ibv_exp_flow_attr){
 		.type = IBV_EXP_FLOW_ATTR_NORMAL,
-		.priority = init->flow_priority,
+		.priority = init->flow_priority + 3,
 		.num_of_specs = 0,
 		.port = priv->port,
 		.flags = 0,
