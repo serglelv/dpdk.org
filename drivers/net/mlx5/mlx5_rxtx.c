@@ -406,9 +406,9 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 static inline void
 mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 		    uintptr_t addr, uint32_t length, uint32_t lkey,
-		    uint16_t *vlan_tci)
+		    uint16_t vlan_tci)
 {
-	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
+	uint32_t vlan = htonl(0x81000000 | vlan_tci);
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
 	/*
@@ -475,9 +475,9 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 static inline void
 mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 		    uintptr_t addr, uint32_t length, uint32_t lkey,
-		    uint16_t *vlan_tci)
+		    uint16_t vlan_tci)
 {
-	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
+	uint32_t vlan = htonl(0x81000000 | vlan_tci);
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
 	/*
@@ -574,11 +574,11 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 static inline void
 mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-			   uintptr_t addr, uint32_t length, uint16_t *vlan_tci)
+			   uintptr_t addr, uint32_t length, uint16_t vlan_tci)
 {
 	uint32_t size;
 	uint32_t wqes_cnt = 1;
-	uint32_t vlan = htonl(0x81000000 | *vlan_tci);
+	uint32_t vlan = htonl(0x81000000 | vlan_tci);
 	volatile struct mlx5_wqe64_inl *inl_wqe =
 		(volatile struct mlx5_wqe64_inl *)wqe;
 
@@ -784,7 +784,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			if (buf->ol_flags & PKT_TX_VLAN_PKT)
 				mlx5_wqe_write_inline_vlan(txq, wqe,
 							   addr, length,
-							   &buf->vlan_tci);
+							   buf->vlan_tci);
 			else
 				mlx5_wqe_write_inline(txq, wqe, addr, length);
 		else
@@ -794,7 +794,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			lkey = txq_mp2mr(txq, txq_mb2mp(buf));
 			if (buf->ol_flags & PKT_TX_VLAN_PKT)
 				mlx5_wqe_write_vlan(txq, wqe, addr, length,
-						    lkey, &buf->vlan_tci);
+						    lkey, buf->vlan_tci);
 			else
 				mlx5_wqe_write(txq, wqe, addr, length, lkey);
 		}
