@@ -444,9 +444,17 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 #else /* MLX5_PMD_MAX_INLINE == 0 */
 
 static inline void
-mlx5_wqe_write_common(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-		      uintptr_t addr, uint32_t length, uint32_t lkey)
+mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+	       uintptr_t addr, uint32_t length, uint32_t lkey)
 {
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
+	/* Copy the first 16 bytes into the inline header */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       MLX5_ETH_INLINE_HEADER_SIZE);
+	addr += MLX5_ETH_INLINE_HEADER_SIZE;
+	length -= MLX5_ETH_INLINE_HEADER_SIZE;
+
 	wqe->dseg.byte_count = htonl(length);
 	wqe->dseg.lkey = lkey;
 	wqe->dseg.addr = htonll(addr);
@@ -462,21 +470,6 @@ mlx5_wqe_write_common(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 	/* Increase the consumer index. */
 	++txq->wqe_ci;
-}
-
-static inline void
-mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-	       uintptr_t addr, uint32_t length, uint32_t lkey)
-{
-	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
-	/* Copy the first 16 bytes into the inline header */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       MLX5_ETH_INLINE_HEADER_SIZE);
-	addr += MLX5_ETH_INLINE_HEADER_SIZE;
-	length -= MLX5_ETH_INLINE_HEADER_SIZE;
-
-	mlx5_wqe_write_common(txq, wqe, addr, length, lkey);
 }
 
 static inline void
@@ -505,17 +498,39 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 
-	mlx5_wqe_write_common(txq, wqe, addr, length, lkey);
+	wqe->dseg.byte_count = htonl(length);
+	wqe->dseg.lkey = lkey;
+	wqe->dseg.addr = htonll(addr);
+
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+	wqe->ctrl.data[1] = htonl(txq->qp_num_8s | 4);
+	if (unlikely(--txq->elts_comp == 0)) {
+		wqe->ctrl.data[2] = htonl(8);
+		txq->elts_comp = txq->elts_comp_cd_init;
+	} else
+		wqe->ctrl.data[2] = htonl(0);
+	wqe->ctrl.data[3] = 0;
+
+	/* Increase the consumer index. */
+	++txq->wqe_ci;
 }
 
 static inline void
-mlx5_wqe_write_inline_common(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-			     uintptr_t addr, uint32_t length)
+mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+		      uintptr_t addr, uint32_t length)
 {
+	uint32_t size;
 	uint32_t wqes_cnt = 1;
 	volatile struct mlx5_wqe64_inl *inl_wqe =
 		(volatile struct mlx5_wqe64_inl *)wqe;
-	uint32_t size;
+
+	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
+	/* Copy the first 16 bytes into the inline header */
+	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+	       (void *)(uintptr_t)addr,
+	       MLX5_ETH_INLINE_HEADER_SIZE);
+	addr += MLX5_ETH_INLINE_HEADER_SIZE;
+	length -= MLX5_ETH_INLINE_HEADER_SIZE;
 
 	size = (sizeof(wqe->ctrl.ctrl) +
 		sizeof(wqe->eseg) +
@@ -555,29 +570,17 @@ mlx5_wqe_write_inline_common(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 	/* Increase the consumer index. */
 	txq->wqe_ci += wqes_cnt;
-
-}
-
-static inline void
-mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-		      uintptr_t addr, uint32_t length)
-{
-	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
-	/* Copy the first 16 bytes into the inline header */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       MLX5_ETH_INLINE_HEADER_SIZE);
-	addr += MLX5_ETH_INLINE_HEADER_SIZE;
-	length -= MLX5_ETH_INLINE_HEADER_SIZE;
-
-	mlx5_wqe_write_inline_common(txq, wqe, addr, length);
 }
 
 static inline void
 mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 			   uintptr_t addr, uint32_t length, uint16_t vlan_tci)
 {
+	uint32_t size;
+	uint32_t wqes_cnt = 1;
 	uint32_t vlan = htonl(0x81000000 | vlan_tci);
+	volatile struct mlx5_wqe64_inl *inl_wqe =
+		(volatile struct mlx5_wqe64_inl *)wqe;
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
 	/*
@@ -598,7 +601,44 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 
-	mlx5_wqe_write_inline_common(txq, wqe, addr, length);
+	size = (sizeof(wqe->ctrl.ctrl) +
+		sizeof(wqe->eseg) +
+		sizeof(wqe->dseg.byte_count) +
+		length + 15) / 16;
+
+	wqe->dseg.byte_count = htonl(length | MLX5_INLINE_SEG);
+	memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
+	       (void *)addr, MLX5_WQE64_INL_DATA);
+	addr += MLX5_WQE64_INL_DATA;
+	length -= MLX5_WQE64_INL_DATA;
+
+	while (length) {
+		volatile struct mlx5_wqe64_inl *wqe_next =
+			(volatile struct mlx5_wqe64_inl *)
+			&(*txq->wqes)[(txq->wqe_ci + wqes_cnt) &
+				      (txq->wqe_cnt - 1)];
+		uint32_t copy_bytes = (length > sizeof(*wqe)) ?
+				      sizeof(*wqe) :
+				      length;
+
+		memcpy((void *)(uintptr_t)wqe_next->wqe.data, (void *)addr,
+		       copy_bytes);
+		addr += copy_bytes;
+		length -= copy_bytes;
+		wqes_cnt++;
+	}
+
+	wqe->ctrl.data[0] = htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND);
+	wqe->ctrl.data[1] = htonl(txq->qp_num_8s | (size & 0x3f));
+	if (unlikely(--txq->elts_comp == 0)) {
+		wqe->ctrl.data[2] = htonl(8);
+		txq->elts_comp = txq->elts_comp_cd_init;
+	} else
+		wqe->ctrl.data[2] = htonl(0);
+	wqe->ctrl.data[3] = 0;
+
+	/* Increase the consumer index. */
+	txq->wqe_ci += wqes_cnt;
 }
 #endif /* MLX5_PMD_MAX_INLINE == 0 */
 
