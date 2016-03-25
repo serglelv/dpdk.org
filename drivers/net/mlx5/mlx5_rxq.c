@@ -716,7 +716,7 @@ rxq_alloc_elts_sp(struct rxq *rxq, unsigned int elts_n,
 	      (void *)rxq, elts_n, (elts_n * RTE_DIM((*elts)[0].sges)));
 	rxq->elts_n = elts_n;
 	rxq->elts_head = 0;
-	rxq->elts.sp = elts;
+	rxq->elts_sp = elts;
 	assert(ret == 0);
 	return 0;
 error:
@@ -751,11 +751,11 @@ rxq_free_elts_sp(struct rxq *rxq)
 {
 	unsigned int i;
 	unsigned int elts_n = rxq->elts_n;
-	struct rxq_elt_sp (*elts)[elts_n] = rxq->elts.sp;
+	struct rxq_elt_sp (*elts)[elts_n] = rxq->elts_sp;
 
 	DEBUG("%p: freeing WRs", (void *)rxq);
 	rxq->elts_n = 0;
-	rxq->elts.sp = NULL;
+	rxq->elts_sp = NULL;
 	if (elts == NULL)
 		return;
 	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
@@ -838,7 +838,7 @@ rxq_alloc_elts(struct rxq *rxq, unsigned int elts_n, struct rte_mbuf **pool)
 	      (void *)rxq, elts_n);
 	rxq->elts_n = elts_n;
 	rxq->elts_head = 0;
-	rxq->elts.no_sp = elts;
+	rxq->elts = elts;
 	assert(ret == 0);
 	return 0;
 error:
@@ -869,11 +869,11 @@ rxq_free_elts(struct rxq *rxq)
 {
 	unsigned int i;
 	unsigned int elts_n = rxq->elts_n;
-	struct rxq_elt (*elts)[elts_n] = rxq->elts.no_sp;
+	struct rxq_elt (*elts)[elts_n] = rxq->elts;
 
 	DEBUG("%p: freeing WRs", (void *)rxq);
 	rxq->elts_n = 0;
-	rxq->elts.no_sp = NULL;
+	rxq->elts = NULL;
 	if (elts == NULL)
 		return;
 	for (i = 0; (i != RTE_DIM(*elts)); ++i) {
@@ -1024,7 +1024,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	/* Snatch mbufs from original queue. */
 	k = 0;
 	if (rxq->sp) {
-		struct rxq_elt_sp (*elts)[rxq->elts_n] = rxq->elts.sp;
+		struct rxq_elt_sp (*elts)[rxq->elts_n] = rxq->elts_sp;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			struct rxq_elt_sp *elt = &(*elts)[i];
@@ -1036,7 +1036,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 			}
 		}
 	} else {
-		struct rxq_elt (*elts)[rxq->elts_n] = rxq->elts.no_sp;
+		struct rxq_elt (*elts)[rxq->elts_n] = rxq->elts;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			struct rxq_elt *elt = &(*elts)[i];
@@ -1047,8 +1047,8 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	}
 	assert(k == mbuf_n);
 	tmpl.elts_n = 0;
-	tmpl.elts.sp = NULL;
-	assert((void *)&tmpl.elts.sp == (void *)&tmpl.elts.no_sp);
+	tmpl.elts_sp = NULL;
+	assert((void *)&tmpl.elts_sp == (void *)&tmpl.elts);
 	err = ((tmpl.sp) ?
 	       rxq_alloc_elts_sp(&tmpl, desc_n, pool) :
 	       rxq_alloc_elts(&tmpl, desc_n, pool));
@@ -1059,12 +1059,12 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		return err;
 	}
 	assert(tmpl.elts_n == desc_n);
-	assert(tmpl.elts.sp != NULL);
+	assert(tmpl.elts_sp != NULL);
 	rte_free(pool);
 	/* Clean up original data. */
 	rxq->elts_n = 0;
-	rte_free(rxq->elts.sp);
-	rxq->elts.sp = NULL;
+	rte_free(rxq->elts_sp);
+	rxq->elts_sp = NULL;
 	/* Change queue state to ready. */
 	mod = (struct ibv_exp_wq_attr){
 		.attr_mask = IBV_EXP_WQ_ATTR_STATE,
@@ -1079,7 +1079,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	/* Post SGEs. */
 	assert(tmpl.if_wq != NULL);
 	if (tmpl.sp) {
-		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
+		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts_sp;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			err = tmpl.if_wq->recv_sg_list
@@ -1090,7 +1090,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 				break;
 		}
 	} else {
-		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
+		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			err = tmpl.if_wq->recv_burst(
@@ -1354,7 +1354,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	}
 	/* Post SGEs. */
 	if (tmpl.sp) {
-		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts.sp;
+		struct rxq_elt_sp (*elts)[tmpl.elts_n] = tmpl.elts_sp;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			ret = tmpl.if_wq->recv_sg_list
@@ -1365,7 +1365,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 				break;
 		}
 	} else {
-		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts.no_sp;
+		struct rxq_elt (*elts)[tmpl.elts_n] = tmpl.elts;
 
 		for (i = 0; (i != RTE_DIM(*elts)); ++i) {
 			ret = tmpl.if_wq->recv_burst(

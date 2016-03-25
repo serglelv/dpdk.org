@@ -118,9 +118,9 @@ struct rxq {
 	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
 	unsigned int crc_present:1; /* CRC must be subtracted. */
 	union {
-		struct rxq_elt_sp (*sp)[]; /* Scattered RX elements. */
-		struct rxq_elt (*no_sp)[]; /* RX elements. */
-	} elts;
+		struct rxq_elt_sp (*elts_sp)[]; /* Scattered RX elements. */
+		struct rxq_elt (*elts)[]; /* RX elements. */
+	};
 	uint32_t mb_len; /* Length of a mp-issued mbuf. */
 	unsigned int socket; /* CPU socket ID for allocations. */
 	struct mlx5_rxq_stats stats; /* RX queue counters. */

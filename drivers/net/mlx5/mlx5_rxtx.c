@@ -852,7 +852,7 @@ uint16_t
 mlx5_rx_burst_sp(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 {
 	struct rxq *rxq = (struct rxq *)dpdk_rxq;
-	struct rxq_elt_sp (*elts)[rxq->elts_n] = rxq->elts.sp;
+	struct rxq_elt_sp (*elts)[rxq->elts_n] = rxq->elts_sp;
 	const unsigned int elts_n = rxq->elts_n;
 	unsigned int elts_head = rxq->elts_head;
 	unsigned int i;
@@ -1060,7 +1060,7 @@ uint16_t
 mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 {
 	struct rxq *rxq = (struct rxq *)dpdk_rxq;
-	struct rxq_elt (*elts)[rxq->elts_n] = rxq->elts.no_sp;
+	struct rxq_elt (*elts)[rxq->elts_n] = rxq->elts;
 	const unsigned int elts_n = rxq->elts_n;
 	unsigned int elts_head = rxq->elts_head;
 	struct ibv_sge sges[pkts_n];

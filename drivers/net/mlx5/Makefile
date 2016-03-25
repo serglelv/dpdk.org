@@ -56,7 +56,7 @@ DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_mempool
 
 # Basic CFLAGS.
 CFLAGS += -O3
-CFLAGS += -std=gnu99 -Wall -Wextra
+CFLAGS += -std=gnu11 -Wall -Wextra
 CFLAGS += -g
 CFLAGS += -I.
 CFLAGS += -D_XOPEN_SOURCE=600
