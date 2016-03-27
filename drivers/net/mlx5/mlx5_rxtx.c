@@ -122,11 +122,10 @@ check_cqe64(volatile struct mlx5_cqe64 *cqe,
  */
 static inline uint16_t
 txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
-			uint16_t *cq_ci)
+			uint16_t *cq_ci, uint16_t cqe_n)
 {
 	volatile struct mlx5_mini_cqe8 (*mc)[8];
 	uint32_t cqe_cnt = ntohl(cqe->byte_cnt);
-	const unsigned int cqe_n = MLX5_TX_CQ_SIZE - 1;
 	uint16_t mc_pos;
 	uint16_t wqe_ci;
 
@@ -166,7 +165,8 @@ static void
 txq_complete(struct ftxq *txq)
 {
 	const unsigned int elts_n = txq->elts_n;
-	const unsigned int cqe_n = MLX5_TX_CQ_SIZE - 1;
+	const unsigned int cqe_cnt = txq->cqe_cnt;
+	const unsigned int cqe_n = cqe_cnt + 1;
 	uint16_t elts_free = txq->elts_tail;
 	uint16_t elts_tail;
 	uint16_t cq_ci = txq->cq_ci;
@@ -174,15 +174,16 @@ txq_complete(struct ftxq *txq)
 	int ret = 0;
 
 	while (ret == 0) {
-		unsigned int idx = cq_ci & cqe_n;
+		unsigned int idx = cq_ci & cqe_cnt;
 		volatile struct mlx5_cqe64 *cqe = &(*txq->cqes)[idx];
 
-		ret = check_cqe64(cqe, MLX5_TX_CQ_SIZE, cq_ci);
+		ret = check_cqe64(cqe, cqe_n, cq_ci);
 		if (ret == 1)
 			break;
 
 		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED)
-			wqe_ci = txq_complete_compressed(txq, cqe, &cq_ci);
+			wqe_ci = txq_complete_compressed(txq, cqe,
+							 &cq_ci, cqe_cnt);
 		else if ((MLX5_CQE_OPCODE(cqe->op_own) == MLX5_CQE_REQ)) {
 			wqe_ci = ntohs(cqe->wqe_counter);
 			++cq_ci;
@@ -233,10 +234,9 @@ txq_complete(struct ftxq *txq)
  */
 static inline uint32_t
 txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
-			uint16_t *cq_ci)
+			uint16_t *cq_ci, uint16_t cqe_n)
 {
 	uint32_t cqe_cnt = ntohl(cqe->byte_cnt);
-	const unsigned int cqe_n = MLX5_TX_CQ_SIZE - 1;
 	uint32_t cqe_polled;
 
 	cqe_polled = cqe_cnt;
@@ -266,7 +266,8 @@ static void
 txq_complete(struct ftxq *txq)
 {
 	const unsigned int elts_n = txq->elts_n;
-	const unsigned int cqe_n = MLX5_TX_CQ_SIZE - 1;
+	const unsigned int cqe_cnt = txq->cqe_cnt;
+	const unsigned int cqe_n = cqe_cnt + 1;
 	uint16_t elts_free = txq->elts_tail;
 	uint16_t elts_tail = txq->elts_tail;
 	uint16_t cq_ci = txq->cq_ci;
@@ -274,15 +275,16 @@ txq_complete(struct ftxq *txq)
 	int ret = 0;
 
 	while (ret == 0) {
-		unsigned int idx = cq_ci & cqe_n;
+		unsigned int idx = cq_ci & cqe_cnt;
 		volatile struct mlx5_cqe64 *cqe = &(*txq->cqes)[idx];
 
-		ret = check_cqe64(cqe, MLX5_TX_CQ_SIZE, cq_ci);
+		ret = check_cqe64(cqe, cqe_n, cq_ci);
 		if (ret == 1)
 			break;
 
 		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED)
-			npolled += txq_complete_compressed(txq, cqe, &cq_ci);
+			npolled += txq_complete_compressed(txq, cqe,
+							   &cq_ci, cqe_cnt);
 		else if ((MLX5_CQE_OPCODE(cqe->op_own) == MLX5_CQE_REQ)) {
 			npolled++;
 			++cq_ci;

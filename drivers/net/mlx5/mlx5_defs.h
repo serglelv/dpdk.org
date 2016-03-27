@@ -54,9 +54,6 @@
 /* RSS Indirection table size. */
 #define RSS_INDIRECTION_TABLE_SIZE 512
 
-/* TX Completion Queue size. */
-#define MLX5_TX_CQ_SIZE 16
-
 /* size of CRC to be stripped */
 #define CRC_SIZE 4
 

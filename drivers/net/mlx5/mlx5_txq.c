@@ -199,15 +199,8 @@ txq_ftxq_setup(struct txq *tmpl, struct txq *txq)
 	struct mlx5_qp *qp = to_mqp(tmpl->qp);
 	struct ibv_cq *ibcq = tmpl->cq;
 	struct mlx5_cq *cq = to_mxxx(cq, cq);
-	unsigned int elts_n = tmpl->ftxq.elts_n;
 
-	/* Request send completion every MLX5_PMD_TX_PER_COMP_REQ packets or
-	 * at least 4 times per ring. */
-	tmpl->ftxq.elts_comp_cd_init =
-		((MLX5_PMD_TX_PER_COMP_REQ < (elts_n / 4)) ?
-		 MLX5_PMD_TX_PER_COMP_REQ : (elts_n / 4));
-	tmpl->ftxq.elts_comp_npr = elts_n / tmpl->ftxq.elts_comp_cd_init;
-
+	tmpl->ftxq.cqe_cnt = ibcq->cqe;
 	tmpl->ftxq.qp_num_8s = qp->ctrl_seg.qp_num << 8;
 	tmpl->ftxq.wqes =
 		(volatile struct mlx5_wqe64 (*)[])
@@ -265,6 +258,11 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 
 	(void)conf; /* Thresholds configuration (ignored). */
 	tmpl.ftxq.elts_n = desc;
+	/* Request send completion every MLX5_PMD_TX_PER_COMP_REQ packets or
+	 * at least 4 times per ring. */
+	tmpl.ftxq.elts_comp_cd_init =
+		((MLX5_PMD_TX_PER_COMP_REQ < (desc / 4)) ?
+		 MLX5_PMD_TX_PER_COMP_REQ : (desc / 4));
 
 	/* MRs will be registered in mp2mr[] later. */
 	attr.rd = (struct ibv_exp_res_domain_init_attr){
@@ -284,7 +282,8 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
 		.res_domain = tmpl.rd,
 	};
-	tmpl.cq = ibv_exp_create_cq(priv->ctx, MLX5_TX_CQ_SIZE - 1,
+	tmpl.cq = ibv_exp_create_cq(priv->ctx,
+				    (desc / tmpl.ftxq.elts_comp_cd_init) - 1,
 				    NULL, NULL, 0, &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
