@@ -919,7 +919,7 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
 	int len = 0;
 
 	/* Process the compressed data present in the CQE and its mini arrays. */
-	if (likely(cqe->zip.comp_flag == 1)) {
+	if (likely(rxq->compressed)) {
 		volatile struct mlx5_mini_cqe8 (*mc)[8] =
 			(volatile struct mlx5_mini_cqe8 (*)[8])
 			(uintptr_t)&(*rxq->cqes)[cqe->zip.cq_ci_carray &
@@ -944,7 +944,7 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
 				++idx;
 			}
 			rxq->cq_ci = cqe->zip.cq_ci;
-			cqe->zip.comp_flag = 0;
+			rxq->compressed = 0;
 		}
 	/* No compressed data, get the next CQE and verify if it compressed. */
 	} else {
@@ -967,7 +967,7 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
 			cqe->zip.cqe_cnt = ntohl(cqe->cqe64.byte_cnt);
 			cqe->zip.wqe_cnt = ntohs(cqe->cqe64.wqe_counter);
 
-			cqe->zip.comp_flag = 1;
+			rxq->compressed = 1;
 			/* Current mini array position is the one returned by
 			 * check_cqe64() which increased by itself the
 			 * consumer index.

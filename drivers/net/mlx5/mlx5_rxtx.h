@@ -98,6 +98,7 @@ struct frxq {
 	uint16_t elts_n;
 	uint16_t cqe_cnt;
 	uint16_t port_id;
+	unsigned int compressed:1; /* Set when a compressed CQE is being processed. */
 	unsigned int csum:1; /* Enable checksum offloading. */
 	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
 	unsigned int crc_present:1; /* CRC must be subtracted. */

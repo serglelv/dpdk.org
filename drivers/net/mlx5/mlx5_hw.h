@@ -62,7 +62,7 @@
 #define MLX5_CQE_VLAN_STRIPPED	0x1
 
 struct mlx5_cqe_comp {
-	uint8_t comp_flag;
+	uint8_t rsvd0;
 	uint8_t scqe_idx;
 	uint16_t wqe_id;
 	uint16_t cq_ci_narray;
