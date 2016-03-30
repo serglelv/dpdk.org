@@ -90,6 +90,14 @@ struct fdir_queue {
 
 struct priv;
 
+struct rxq_zip {
+	uint16_t ai; /* Array index. */
+	uint16_t ca; /* Current array index. */
+	uint16_t na; /* Next array index. */
+	uint16_t cq_ci; /* The next CQE. */
+	uint32_t cqe_cnt;
+};
+
 /* RX queue descriptor. */
 struct frxq {
 	uint16_t idx;
@@ -98,16 +106,16 @@ struct frxq {
 	uint16_t elts_n;
 	uint16_t cqe_cnt;
 	uint16_t port_id;
-	unsigned int compressed:1; /* Set when a compressed CQE is being processed. */
-	unsigned int csum:1; /* Enable checksum offloading. */
-	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
-	unsigned int crc_present:1; /* CRC must be subtracted. */
+	struct rxq_zip zip; /* Compressed context. */
 	volatile struct mlx5_wqe_data_seg (*wqes)[];
 	volatile struct mlx5_cqe64 (*cqes)[];
 	volatile uint32_t *rq_db;
 	volatile uint32_t *cq_db;
 	struct rte_mbuf *(*elts)[];
 	struct rte_mempool *mp;
+	unsigned int csum:1; /* Enable checksum offloading. */
+	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
+	unsigned int crc_present:1; /* CRC must be subtracted. */
 	struct mlx5_rxq_stats stats;
 } __attribute__((aligned(64)));
 

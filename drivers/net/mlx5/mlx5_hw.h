@@ -61,48 +61,4 @@
 
 #define MLX5_CQE_VLAN_STRIPPED	0x1
 
-struct mlx5_cqe_comp {
-	uint8_t rsvd0;
-	uint8_t scqe_idx;
-	uint16_t wqe_id;
-	uint16_t cq_ci_narray;
-	uint16_t cq_ci_carray;
-	uint8_t	rsvd4[4];
-	uint32_t rx_hash_res;
-	uint8_t rx_hash_type;
-	uint8_t ml_path;
-	uint16_t cqe_ci;
-	uint16_t checksum;
-	uint16_t slid;
-	uint32_t flags_rqpn;
-	uint8_t hds_ip_ext;
-	uint8_t l4_hdr_type_etc;
-	__be16 vlan_info;
-	uint32_t srqn_uidx;
-	uint32_t imm_inval_pkey;
-	uint16_t rsvd40;
-	uint16_t cq_ci;
-	uint32_t cqe_cnt;
-	__be64	 timestamp;
-	union {
-		uint32_t sop_drop_qpn;
-		struct {
-			uint8_t	sop;
-			uint8_t qpn[3];
-		} sop_qpn;
-	} sop;
-	/*
-	 * In Striding RQ (Multi-Packet RQ) wqe_counter provides
-	 * the WQE stride index (to calc pointer to start of the message)
-	 */
-	uint16_t wqe_cnt;
-	uint8_t signature;
-	uint8_t op_own;
-} __attribute__((aligned(64)));
-
-union mlx5_rx_cqe {
-	struct mlx5_cqe64 cqe64;
-	struct mlx5_cqe_comp zip;
-};
-
 #endif /* RTE_PMD_MLX5_HW_H_ */

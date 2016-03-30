@@ -912,50 +912,50 @@ rxq_cq_to_ol_flags(volatile struct mlx5_cqe64 *cqe)
 }
 
 static inline int
-mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
+mlx5_rx_poll_len(struct frxq *rxq, volatile struct mlx5_cqe64 *cqe,
 		 uint16_t cqe_cnt)
 {
+	struct rxq_zip *zip = &rxq->zip;
 	uint16_t cqe_n = cqe_cnt + 1;
 	int len = 0;
 
 	/* Process the compressed data present in the CQE and its mini arrays. */
-	if (likely(rxq->compressed)) {
+	if (likely(zip->ai)) {
 		volatile struct mlx5_mini_cqe8 (*mc)[8] =
 			(volatile struct mlx5_mini_cqe8 (*)[8])
-			(uintptr_t)&(*rxq->cqes)[cqe->zip.cq_ci_carray &
-						 cqe_cnt];
+			(uintptr_t)&(*rxq->cqes)[zip->ca & cqe_cnt];
 
-		len = ntohl((*mc)[cqe->zip.scqe_idx & 7].byte_cnt);
-		if ((++cqe->zip.scqe_idx & 7) == 0) {
+		len = ntohl((*mc)[zip->ai & 7].byte_cnt);
+		if ((++zip->ai & 7) == 0) {
 			/* Increase the consumer index to jump the number of
 			 * CQE consumed.  The hardware leave holes in CQ ring
 			 * for the software. */
-			cqe->zip.cq_ci_carray = cqe->zip.cq_ci_narray;
-			cqe->zip.cq_ci_narray += 8;
+			zip->ca = zip->na;
+			zip->na += 8;
 		}
 
-		if (unlikely(cqe->zip.scqe_idx == cqe->zip.cqe_cnt)) {
+		if (unlikely(rxq->zip.ai == rxq->zip.cqe_cnt)) {
 			uint16_t idx = rxq->cq_ci;
-			uint16_t end = cqe->zip.cq_ci;
+			uint16_t end = zip->cq_ci;
 
 			while (idx != end) {
 				(*rxq->cqes)[idx & cqe_cnt].op_own =
 					MLX5_CQE_INVALIDATE;
 				++idx;
 			}
-			rxq->cq_ci = cqe->zip.cq_ci;
-			rxq->compressed = 0;
+			rxq->cq_ci = zip->cq_ci;
+			zip->ai = 0;
 		}
 	/* No compressed data, get the next CQE and verify if it compressed. */
 	} else {
 		int ret;
 		int8_t op_own;
 
-		ret = check_cqe64(&cqe->cqe64, cqe_n, rxq->cq_ci);
+		ret = check_cqe64(cqe, cqe_n, rxq->cq_ci);
 		if (unlikely(ret == 1))
 			return 0;
 		++rxq->cq_ci;
-		op_own = cqe->cqe64.op_own;
+		op_own = cqe->op_own;
 
 		if (MLX5_CQE_FORMAT(op_own) == MLX5_COMPRESSED) {
 			volatile struct mlx5_mini_cqe8 (*mc)[8] =
@@ -964,10 +964,8 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
 							 cqe_cnt];
 
 			/* Update big endian fields to little endian ones. */
-			cqe->zip.cqe_cnt = ntohl(cqe->cqe64.byte_cnt);
-			cqe->zip.wqe_cnt = ntohs(cqe->cqe64.wqe_counter);
+			zip->cqe_cnt = ntohl(cqe->byte_cnt);
 
-			rxq->compressed = 1;
 			/* Current mini array position is the one returned by
 			 * check_cqe64() which increased by itself the
 			 * consumer index.
@@ -977,19 +975,18 @@ mlx5_rx_poll_len(struct frxq *rxq, volatile union mlx5_rx_cqe *cqe,
 			 * position.  It is a special case, after this one,
 			 * the next mini array will 8 CQEs after.
 			 */
-			cqe->zip.cq_ci_carray = rxq->cq_ci & cqe_cnt;
-			cqe->zip.cq_ci_narray = cqe->zip.cq_ci_carray + 7;
+			zip->ca = rxq->cq_ci & cqe_cnt;
+			zip->na = zip->ca + 7;
 
 			/* Compute the next non compressed CQE. */
 			--rxq->cq_ci;
-			cqe->zip.cq_ci = rxq->cq_ci + cqe->zip.cqe_cnt;
+			zip->cq_ci = rxq->cq_ci + zip->cqe_cnt;
 
 			/* Get the packet size and return it. */
 			len = ntohl((*mc)[0].byte_cnt);
-			cqe->zip.scqe_idx = 1;
-		} else {
-			len = ntohl(cqe->cqe64.byte_cnt);
-		}
+			zip->ai = 1;
+		} else
+			len = ntohl(cqe->byte_cnt);
 	}
 
 	return len;
@@ -1027,9 +1024,9 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		struct rte_mbuf *rep;
 		struct rte_mbuf *pkt;
 		unsigned int len;
-		volatile struct mlx5_wqe_data_seg *wqe = &(*rxq->wqes)[idx & wqe_cnt];
-		volatile union mlx5_rx_cqe *cqe =
-			(volatile union mlx5_rx_cqe *)
+		volatile struct mlx5_wqe_data_seg *wqe =
+			&(*rxq->wqes)[idx & wqe_cnt];
+		volatile struct mlx5_cqe64 *cqe =
 			&(*rxq->cqes)[rxq->cq_ci & cqe_cnt];
 
 		pkt = (*rxq->elts)[idx];
@@ -1062,14 +1059,13 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		if (rxq->csum | rxq->vlan_strip | rxq->crc_present) {
 			if (rxq->csum) {
 				pkt->packet_type =
-					rxq_cq_to_pkt_type(&cqe->cqe64);
+					rxq_cq_to_pkt_type(cqe);
 				pkt->ol_flags =
-					rxq_cq_to_ol_flags(&cqe->cqe64);
+					rxq_cq_to_ol_flags(cqe);
 			}
-			if (cqe->cqe64.l4_hdr_type_etc &
-			    MLX5_CQE_VLAN_STRIPPED) {
+			if (cqe->l4_hdr_type_etc & MLX5_CQE_VLAN_STRIPPED) {
 				pkt->ol_flags |= PKT_RX_VLAN_PKT;
-				pkt->vlan_tci = ntohs(cqe->cqe64.vlan_info);
+				pkt->vlan_tci = ntohs(cqe->vlan_info);
 			}
 			if (rxq->crc_present)
 				len -= CRC_SIZE;
