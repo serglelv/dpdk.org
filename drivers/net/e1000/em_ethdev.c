@@ -596,7 +596,7 @@ eth_em_start(struct rte_eth_dev *dev)
 		else
 			goto error_invalid_config;
 		break;
-	case ETH_LINK_SPEED_10:
+	case ETH_SPEED_NUM_10M:
 		if (dev->data->dev_conf.link_duplex == ETH_LINK_AUTONEG_DUPLEX)
 			hw->phy.autoneg_advertised = E1000_ALL_10_SPEED;
 		else if (dev->data->dev_conf.link_duplex ==
@@ -608,7 +608,7 @@ eth_em_start(struct rte_eth_dev *dev)
 		else
 			goto error_invalid_config;
 		break;
-	case ETH_LINK_SPEED_100:
+	case ETH_SPEED_NUM_100M:
 		if (dev->data->dev_conf.link_duplex == ETH_LINK_AUTONEG_DUPLEX)
 			hw->phy.autoneg_advertised = E1000_ALL_100_SPEED;
 		else if (dev->data->dev_conf.link_duplex ==
@@ -620,7 +620,7 @@ eth_em_start(struct rte_eth_dev *dev)
 		else
 			goto error_invalid_config;
 		break;
-	case ETH_LINK_SPEED_1000:
+	case ETH_SPEED_NUM_1G:
 		if ((dev->data->dev_conf.link_duplex ==
 				ETH_LINK_AUTONEG_DUPLEX) ||
 			(dev->data->dev_conf.link_duplex ==
@@ -629,7 +629,7 @@ eth_em_start(struct rte_eth_dev *dev)
 		else
 			goto error_invalid_config;
 		break;
-	case ETH_LINK_SPEED_10000:
+	case ETH_SPEED_NUM_10G:
 	default:
 		goto error_invalid_config;
 	}

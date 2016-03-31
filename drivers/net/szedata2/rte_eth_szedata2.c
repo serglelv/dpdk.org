@@ -111,7 +111,7 @@ static struct ether_addr eth_addr = {
 };
 static const char *drivername = "SZEdata2 PMD";
 static struct rte_eth_link pmd_link = {
-		.link_speed = ETH_LINK_SPEED_10G,
+		.link_speed = ETH_SPEED_NUM_10G,
 		.link_duplex = ETH_LINK_FULL_DUPLEX,
 		.link_status = 0
 };
