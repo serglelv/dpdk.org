@@ -676,50 +676,19 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 }
 #endif /* MLX5_PMD_MAX_INLINE == 0 */
 
-/*
- * Avoid using memcpy() to copy to BlueFlame page, since memcpy()
- * implementations may use move-string-buffer assembler instructions,
- * which do not guarantee order of copying.
- */
-#if defined(__x86_64__)
-#define COPY_64B_NT(dst, src)		\
-	__asm__ __volatile__ (		\
-	" movdqa   (%1),%%xmm0\n"	\
-	" movdqa 16(%1),%%xmm1\n"	\
-	" movdqa 32(%1),%%xmm2\n"	\
-	" movdqa 48(%1),%%xmm3\n"	\
-	" movntdq %%xmm0,   (%0)\n"	\
-	" movntdq %%xmm1, 16(%0)\n"	\
-	" movntdq %%xmm2, 32(%0)\n"	\
-	" movntdq %%xmm3, 48(%0)\n"	\
-	: : "r" (dst), "r" (src) : "memory");	\
-	dst += 8;			\
-	src += 8
-#else
-#define COPY_64B_NT(dst, src)	\
-	*dst++ = *src++;	\
-	*dst++ = *src++;	\
-	*dst++ = *src++;	\
-	*dst++ = *src++;	\
-	*dst++ = *src++;	\
-	*dst++ = *src++;	\
-	*dst++ = *src++;	\
-	*dst++ = *src++
-
-#endif
-
 static inline void
-mlx5_tx_dbrec(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe) {
-	volatile uintptr_t *dst = (volatile uintptr_t *)
-		((uintptr_t)txq->bf_reg + txq->bf_offset);
-	volatile uintptr_t *src = (volatile uintptr_t *)
-		((uintptr_t)wqe);
-
+mlx5_tx_dbrec(struct ftxq *txq) {
+	uint64_t *dst = (uint64_t *)((uintptr_t)txq->bf_reg + txq->bf_offset);
+	uint32_t data[4] = {
+		htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND),
+		htonl(txq->qp_num_8s),
+		0,
+		0};
 	rte_wmb();
 	*txq->qp_db = htonl(txq->wqe_ci);
 	/* This wc_wmb ensures ordering between DB record and BF copy */
 	rte_wmb();
-	COPY_64B_NT(dst, src);
+	memcpy(dst, data, 16);
 	txq->bf_offset ^= txq->bf_buf_size;
 }
 
@@ -850,7 +819,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	txq->stats.opackets += i;
 #endif
 	/* Ring QP doorbell. */
-	mlx5_tx_dbrec(txq, wqe);
+	mlx5_tx_dbrec(txq);
 	txq->elts_head = elts_head;
 	return i;
 }
