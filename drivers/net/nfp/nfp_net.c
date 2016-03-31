@@ -1073,6 +1073,8 @@ nfp_net_infos_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 #if RTE_VER_MAJOR == 2 && RTE_VER_MINOR >= 1
 	dev_info->hash_key_size = NFP_NET_CFG_RSS_KEY_SZ;
 #endif
+
+	dev_info->speed_capa = ETH_LINK_SPEED_40G;
 }
 
 static uint32_t
