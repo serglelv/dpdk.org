@@ -52,7 +52,7 @@
 #define MLX5_PMD_TX_PER_COMP_REQ 64
 
 /* RSS Indirection table size. */
-#define RSS_INDIRECTION_TABLE_SIZE 512
+#define RSS_INDIRECTION_TABLE_SIZE 256
 
 /* size of CRC to be stripped */
 #define CRC_SIZE 4
