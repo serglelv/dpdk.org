@@ -113,6 +113,7 @@ static const char *drivername = "SZEdata2 PMD";
 static struct rte_eth_link pmd_link = {
 		.link_speed = ETH_SPEED_NUM_10G,
 		.link_duplex = ETH_LINK_FULL_DUPLEX,
+		.link_autoneg = ETH_LINK_SPEED_FIXED,
 		.link_status = 0
 };
 
