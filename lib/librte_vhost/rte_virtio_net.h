@@ -153,7 +153,7 @@ struct virtio_memory {
 	uint64_t	mapped_address;	/**< Mapped address of memory file base in our applications memory space. */
 	uint64_t	mapped_size;	/**< Total size of memory file. */
 	uint32_t	nregions;	/**< Number of memory regions. */
-	struct virtio_memory_regions      regions[0]; /**< Memory region information. */
+	struct virtio_memory_regions      regions[]; /**< Memory region information. */
 };
 
 /**
