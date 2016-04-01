@@ -89,6 +89,7 @@ extern "C" {
 
 #if RTE_BYTE_ORDER == RTE_LITTLE_ENDIAN
 /** @internal Tbl24 entry structure. */
+__extension__
 struct rte_lpm_tbl24_entry {
 	/* Stores Next hop or group index (i.e. gindex)into tbl8. */
 	union {
@@ -102,6 +103,7 @@ struct rte_lpm_tbl24_entry {
 };
 
 /** @internal Tbl8 entry structure. */
+__extension__
 struct rte_lpm_tbl8_entry {
 	uint8_t next_hop; /**< next hop. */
 	/* Using single uint8_t to store 3 values. */
@@ -110,6 +112,7 @@ struct rte_lpm_tbl8_entry {
 	uint8_t depth       :6; /**< Rule depth. */
 };
 #else
+__extension__
 struct rte_lpm_tbl24_entry {
 	uint8_t depth       :6;
 	uint8_t ext_entry   :1;
@@ -120,6 +123,7 @@ struct rte_lpm_tbl24_entry {
 	};
 };
 
+__extension__
 struct rte_lpm_tbl8_entry {
 	uint8_t depth       :6;
 	uint8_t valid_group :1;
