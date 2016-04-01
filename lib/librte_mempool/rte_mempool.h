@@ -169,6 +169,7 @@ struct rte_mempool_objhdr {
  * In debug mode, each object stored in mempools are suffixed by this
  * trailer structure containing a cookie preventing memory corruptions.
  */
+__extension__
 struct rte_mempool_objtlr {
 #ifdef RTE_LIBRTE_MEMPOOL_DEBUG
 	uint64_t cookie;                 /**< Debug cookie. */
