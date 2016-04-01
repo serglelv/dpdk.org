@@ -49,6 +49,7 @@ extern "C" {
 #include <rte_mbuf.h>
 #include <rte_memory.h>
 #include <rte_mempool.h>
+#include <rte_common.h>
 
 /** Symmetric Cipher Algorithms */
 enum rte_crypto_cipher_algorithm {
@@ -325,6 +326,7 @@ struct rte_crypto_xform {
 	struct rte_crypto_xform *next; /**< next xform in chain */
 
 	enum rte_crypto_xform_type type; /**< xform type */
+	RTE_STD_C11
 	union {
 		struct rte_crypto_auth_xform auth;
 		/**< Authentication / hash xform */
@@ -375,6 +377,7 @@ struct rte_crypto_op {
 		uint8_t offset;		/**< Data offset */
 	} dst;
 
+	RTE_STD_C11
 	union {
 		struct rte_cryptodev_session *session;
 		/**< Handle for the initialised session context */

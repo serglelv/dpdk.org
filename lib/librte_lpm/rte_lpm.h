@@ -92,6 +92,7 @@ extern "C" {
 __extension__
 struct rte_lpm_tbl24_entry {
 	/* Stores Next hop or group index (i.e. gindex)into tbl8. */
+	RTE_STD_C11
 	union {
 		uint8_t next_hop;
 		uint8_t tbl8_gindex;
