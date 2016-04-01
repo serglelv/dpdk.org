@@ -40,6 +40,7 @@
 #define _KEEPALIVE_H_
 
 #include <rte_memory.h>
+#include <rte_lcore.h>
 
 #ifndef RTE_KEEPALIVE_MAXCORES
 /**

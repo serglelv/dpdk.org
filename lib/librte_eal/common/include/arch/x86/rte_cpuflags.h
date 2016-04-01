@@ -42,6 +42,7 @@ extern "C" {
 #include <stdio.h>
 #include <errno.h>
 #include <stdint.h>
+#include <rte_common.h>
 
 #include "generic/rte_cpuflags.h"
 
