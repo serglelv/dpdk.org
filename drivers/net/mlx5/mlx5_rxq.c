@@ -964,7 +964,8 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		goto error;
 	}
 	attr.cq = (struct ibv_exp_cq_init_attr){
-		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
+		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN |
+			IBV_EXP_CQ_INIT_ATTR_COMP_EN,
 		.res_domain = tmpl.rd,
 	};
 	tmpl.cq = ibv_exp_create_cq(priv->ctx, (2 * desc) - 1, NULL, NULL, 0,

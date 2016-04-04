@@ -109,49 +109,6 @@ check_cqe64(volatile struct mlx5_cqe64 *cqe,
 
 #if MLX5_PMD_MAX_INLINE == 0
 /**
- * Manage TX compressed completions.
- *
- * @param txq
- *   Pointer to TX queue structure.
- * @param  cqe
- *   Poniter to the compressed CQE.
- * @param cq_ci
- *   Pointer to the current consumer index.
- *
- * @retrun
- *   The wqe_ci corresponding to the last packet sent.
- */
-static inline uint16_t
-txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
-			uint16_t *cq_ci, uint16_t cqe_n)
-{
-	volatile struct mlx5_mini_cqe8 (*mc)[8];
-	uint32_t cqe_cnt = ntohl(cqe->byte_cnt);
-	uint16_t mc_pos;
-	uint16_t wqe_ci;
-
-
-	/* The position of the compressed array is after the title CQE, here
-	 * the title CQE is the variable cqe, the next position are in
-	 * multiple of 8 (8 bytes per mini CQE in a single 64 byte CQE)
-	 * if they exists. */
-	mc_pos = ((*cq_ci) + 1 + (cqe_cnt & 0xf8)) & cqe_n;
-	/* First get the last wqe_ci from the mini cqe. */
-	mc = (volatile struct mlx5_mini_cqe8 (*)[8])
-		(uintptr_t)&(*txq->cqes)[mc_pos];
-	wqe_ci = ntohs((*mc)[(cqe_cnt - 1) & 7].s_wqe_info.wqe_counter);
-	/* Reset the owner bit in all CQE. */
-	while(cqe_cnt) {
-		cqe = &(*txq->cqes)[(*cq_ci) & cqe_n];
-		cqe->op_own = MLX5_CQE_INVALIDATE;
-		++(*cq_ci);
-		--cqe_cnt;
-	}
-
-	return wqe_ci;
-}
-
-/**
  * Manage TX completions.
  *
  * When sending a burst, mlx5_tx_burst() posts several WRs.
@@ -181,14 +138,12 @@ txq_complete(struct ftxq *txq)
 		ret = check_cqe64(cqe, cqe_n, cq_ci);
 		if (ret == 1)
 			break;
-
+#ifndef NDEBUG
 		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED)
-			wqe_ci = txq_complete_compressed(txq, cqe,
-							 &cq_ci, cqe_cnt);
-		else if ((MLX5_CQE_OPCODE(cqe->op_own) == MLX5_CQE_REQ)) {
-			wqe_ci = ntohs(cqe->wqe_counter);
-			++cq_ci;
-		}
+			rte_panic("Process a CQE compressed");
+#endif /* NDEBUG */
+		wqe_ci = ntohs(cqe->wqe_counter);
+		++cq_ci;
 	}
 	if (unlikely(wqe_ci == (unsigned int)-1))
 		return;
@@ -221,38 +176,6 @@ txq_complete(struct ftxq *txq)
 #else /* MLX5_PMD_MAX_INLINE == 0 */
 
 /**
- * Manage TX compressed completions.
- *
- * @param txq
- *   Pointer to TX queue structure.
- * @param  cqe
- *   Poniter to the compressed CQE.
- * @param cq_ci
- *   Pointer to the current consumer index.
- *
- * @retrun
- *   Number of received completions.
- */
-static inline uint32_t
-txq_complete_compressed(struct ftxq *txq, volatile struct mlx5_cqe64 *cqe,
-			uint16_t *cq_ci, uint16_t cqe_n)
-{
-	uint32_t cqe_cnt = ntohl(cqe->byte_cnt);
-	uint32_t cqe_polled;
-
-	cqe_polled = cqe_cnt;
-	/* Reset the owner bit in all CQE. */
-	while(cqe_cnt) {
-		cqe = &(*txq->cqes)[(*cq_ci) & cqe_n];
-		cqe->op_own = MLX5_CQE_INVALIDATE;
-		++(*cq_ci);
-		--cqe_cnt;
-	}
-
-	return cqe_polled;
-}
-
-/**
  * Manage TX completions.
  *
  * When sending a burst, mlx5_tx_burst() posts several WRs.
@@ -283,13 +206,12 @@ txq_complete(struct ftxq *txq)
 		if (ret == 1)
 			break;
 
+#ifndef NDEBUG
 		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED)
-			npolled += txq_complete_compressed(txq, cqe,
-							   &cq_ci, cqe_cnt);
-		else if ((MLX5_CQE_OPCODE(cqe->op_own) == MLX5_CQE_REQ)) {
-			npolled++;
-			++cq_ci;
-		}
+			rte_panic("Process a CQE compressed");
+#endif /* NDEBUG */
+		npolled++;
+		++cq_ci;
 	}
 	if (unlikely(npolled == 0))
 		return;
