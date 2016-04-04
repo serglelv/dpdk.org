@@ -67,7 +67,7 @@ enum rte_cryptodev_event_type;
 #define RTE_PMD_DEBUG_TRACE(...) \
 	rte_pmd_debug_trace(__func__, __VA_ARGS__)
 #else
-#define RTE_PMD_DEBUG_TRACE(fmt, args...)
+#define RTE_PMD_DEBUG_TRACE(...)
 #endif
 
 struct rte_cryptodev_session {
