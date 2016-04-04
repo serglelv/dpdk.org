@@ -449,6 +449,14 @@ static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       uintptr_t addr, uint32_t length, uint32_t lkey)
 {
+	wqe->eseg = (struct mlx5_wqe_eth_seg) {
+		.rsvd0 = 0,
+		.cs_flags = 0,
+		.rsvd1 = 0,
+		.mss = 0,
+		.rsvd2 = 0,
+	};
+
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 	/* Copy the first 16 bytes into the inline header */
 	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
@@ -479,6 +487,14 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 		    uintptr_t addr, uint32_t length, uint32_t lkey,
 		    uint16_t vlan_tci)
 {
+	wqe->eseg = (struct mlx5_wqe_eth_seg) {
+		.rsvd0 = 0,
+		.cs_flags = 0,
+		.rsvd1 = 0,
+		.mss = 0,
+		.rsvd2 = 0,
+	};
+
 	uint32_t vlan = htonl(0x81000000 | vlan_tci);
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
@@ -525,6 +541,14 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	uint32_t wqes_cnt = 1;
 	volatile struct mlx5_wqe64_inl *inl_wqe =
 		(volatile struct mlx5_wqe64_inl *)wqe;
+
+	wqe->eseg = (struct mlx5_wqe_eth_seg) {
+		.rsvd0 = 0,
+		.cs_flags = 0,
+		.rsvd1 = 0,
+		.mss = 0,
+		.rsvd2 = 0,
+	};
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 	/* Copy the first 16 bytes into the inline header */
@@ -583,6 +607,14 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	uint32_t vlan = htonl(0x81000000 | vlan_tci);
 	volatile struct mlx5_wqe64_inl *inl_wqe =
 		(volatile struct mlx5_wqe64_inl *)wqe;
+
+	wqe->eseg = (struct mlx5_wqe_eth_seg) {
+		.rsvd0 = 0,
+		.cs_flags = 0,
+		.rsvd1 = 0,
+		.mss = 0,
+		.rsvd2 = 0,
+	};
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
 	/*
