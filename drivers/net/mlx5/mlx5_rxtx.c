@@ -58,6 +58,7 @@
 #include <rte_common.h>
 #include <rte_branch_prediction.h>
 #include <rte_memory.h>
+#include <rte_memcpy.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -386,10 +387,9 @@ static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       uintptr_t addr, uint32_t length, uint32_t lkey)
 {
-	/* Copy the first 16 bytes into the inline header */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       MLX5_ETH_INLINE_HEADER_SIZE);
+	/* Copy the first bytes into the inline header */
+	rte_memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+		   (void *)(uintptr_t)addr, MLX5_ETH_INLINE_HEADER_SIZE);
 	addr += MLX5_ETH_INLINE_HEADER_SIZE;
 	length -= MLX5_ETH_INLINE_HEADER_SIZE;
 
@@ -459,9 +459,8 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 	/* Copy the first 16 bytes into the inline header */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       MLX5_ETH_INLINE_HEADER_SIZE);
+	rte_memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+		   (void *)(uintptr_t)addr, MLX5_ETH_INLINE_HEADER_SIZE);
 	addr += MLX5_ETH_INLINE_HEADER_SIZE;
 	length -= MLX5_ETH_INLINE_HEADER_SIZE;
 
@@ -503,15 +502,12 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	 * Copy 4 bytes of vlan.
 	 * Copy 2 bytes of ether type.
 	 */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       12);
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12),
-	       &vlan,
-	       sizeof(vlan));
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16),
-	       (void *)((uintptr_t)addr + 12),
-	       2);
+	rte_memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+		   (void *)(uintptr_t)addr, 12);
+	rte_memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12),
+		   &vlan, sizeof(vlan));
+	rte_memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16),
+		   (void *)((uintptr_t)addr + 12), 2);
 
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
@@ -552,9 +548,9 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 	/* Copy the first 16 bytes into the inline header */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       MLX5_ETH_INLINE_HEADER_SIZE);
+	rte_memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
+		   (void *)(uintptr_t)addr,
+		   MLX5_ETH_INLINE_HEADER_SIZE);
 	addr += MLX5_ETH_INLINE_HEADER_SIZE;
 	length -= MLX5_ETH_INLINE_HEADER_SIZE;
 
@@ -564,8 +560,8 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 		length + 15) / 16;
 
 	wqe->dseg.byte_count = htonl(length | MLX5_INLINE_SEG);
-	memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
-	       (void *)addr, MLX5_WQE64_INL_DATA);
+	rte_memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
+		   (void *)addr, MLX5_WQE64_INL_DATA);
 	addr += MLX5_WQE64_INL_DATA;
 	length -= MLX5_WQE64_INL_DATA;
 
@@ -578,8 +574,8 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 				      sizeof(*wqe) :
 				      length;
 
-		memcpy((void *)(uintptr_t)wqe_next->wqe.data, (void *)addr,
-		       copy_bytes);
+		rte_mov64((uint8_t*)(uintptr_t)&wqe_next->wqe.data,
+			  (uint8_t*)addr);
 		addr += copy_bytes;
 		length -= copy_bytes;
 		wqes_cnt++;
@@ -622,15 +618,12 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	 * Copy 4 bytes of vlan.
 	 * Copy 2 bytes of ether type.
 	 */
-	memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
-	       (void *)(uintptr_t)addr,
-	       12);
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 12),
-	       &vlan,
-	       sizeof(vlan));
-	memcpy((void *)((uintptr_t)wqe->eseg.inline_hdr_start + 16),
-	       (void *)((uintptr_t)addr + 12),
-	       2);
+	rte_memcpy((uint8_t*)(uintptr_t)wqe->eseg.inline_hdr_start,
+		   (uint8_t*)addr, 12);
+	rte_memcpy((uint8_t*)(uintptr_t)wqe->eseg.inline_hdr_start + 12,
+		   &vlan, sizeof(vlan));
+	rte_memcpy((uint8_t*)(uintptr_t)wqe->eseg.inline_hdr_start + 16,
+		   ((uint8_t*)addr + 12), 2);
 
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
@@ -641,8 +634,8 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 		length + 15) / 16;
 
 	wqe->dseg.byte_count = htonl(length | MLX5_INLINE_SEG);
-	memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
-	       (void *)addr, MLX5_WQE64_INL_DATA);
+	rte_memcpy((void *)(uintptr_t)&inl_wqe->wqe.data[MLX5_WQE64_INL_DATA_OFFSET],
+		   (void *)addr, MLX5_WQE64_INL_DATA);
 	addr += MLX5_WQE64_INL_DATA;
 	length -= MLX5_WQE64_INL_DATA;
 
@@ -655,8 +648,8 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 				      sizeof(*wqe) :
 				      length;
 
-		memcpy((void *)(uintptr_t)wqe_next->wqe.data, (void *)addr,
-		       copy_bytes);
+		rte_mov64((uint8_t*)(uintptr_t)wqe_next->wqe.data,
+			  (uint8_t*)addr);
 		addr += copy_bytes;
 		length -= copy_bytes;
 		wqes_cnt++;
@@ -678,7 +671,7 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 
 static inline void
 mlx5_tx_dbrec(struct ftxq *txq) {
-	uint64_t *dst = (uint64_t *)((uintptr_t)txq->bf_reg + txq->bf_offset);
+	uint8_t *dst = (uint8_t *)((uintptr_t)txq->bf_reg + txq->bf_offset);
 	uint32_t data[4] = {
 		htonl((txq->wqe_ci << 8) | MLX5_OPCODE_SEND),
 		htonl(txq->qp_num_8s),
@@ -688,7 +681,7 @@ mlx5_tx_dbrec(struct ftxq *txq) {
 	*txq->qp_db = htonl(txq->wqe_ci);
 	/* This wc_wmb ensures ordering between DB record and BF copy */
 	rte_wmb();
-	memcpy(dst, data, 16);
+	rte_mov16(dst, (uint8_t*)data);
 	txq->bf_offset ^= txq->bf_buf_size;
 }
 
