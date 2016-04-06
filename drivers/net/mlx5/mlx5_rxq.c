@@ -942,6 +942,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	}
 	tmpl.frxq.elts_n = desc;
 	/* Use the entire RX mempool as the memory region. */
+	tmpl.frxq.mp = mp;
 	tmpl.mr = mlx5_mp2mr(priv->pd, mp);
 	if (tmpl.mr == NULL) {
 		ret = EINVAL;
