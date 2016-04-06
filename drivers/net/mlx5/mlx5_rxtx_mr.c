@@ -92,7 +92,7 @@ mlx5_mp2mr(struct ibv_pd *pd, const struct rte_mempool *mp)
 	return ibv_reg_mr(pd,
 			  (void *)start,
 			  end - start,
-			  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+			  IBV_ACCESS_LOCAL_WRITE);
 }
 
 /**
