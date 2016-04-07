@@ -677,7 +677,124 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			rte_prefetch0((volatile void *)
 				      (uintptr_t)buf_next_addr);
 		}
+		/* Retrieve Memory Region key for this memory pool. */
+		lkey = txq_mp2mr(txq, txq_mb2mp(buf));
+		if (buf->ol_flags & PKT_TX_VLAN_PKT)
+			mlx5_wqe_write_vlan(txq, wqe, addr, length,
+					    lkey, buf->vlan_tci);
+		else
+			mlx5_wqe_write(txq, wqe, addr, length, lkey);
+		if (unlikely(--txq->elts_comp == 0)) {
+			wqe->ctrl.data[2] = htonl(8);
+			txq->elts_comp = txq->elts_comp_cd_init;
+		} else
+			wqe->ctrl.data[2] = 0;
+#ifdef MLX5_PMD_SOFT_COUNTERS
+			sent_size += length;
+#endif
+		elts_head = elts_head_next;
+		buf = buf_next;
+#ifdef MLX5_PMD_SOFT_COUNTERS
+		/* Increment sent bytes counter. */
+		txq->stats.obytes += sent_size;
+#endif
+	}
+	/* Take a shortcut if nothing must be sent. */
+	if (unlikely(i == 0))
+		return 0;
+#ifdef MLX5_PMD_SOFT_COUNTERS
+	/* Increment sent packets counter. */
+	txq->stats.opackets += i;
+#endif
+	/* Ring QP doorbell. */
+	mlx5_tx_dbrec(txq);
+	txq->elts_head = elts_head;
+	return i;
+}
+
 #if MLX5_PMD_MAX_INLINE > 0
+/**
+ * DPDK callback for TX.
+ *
+ * @param dpdk_txq
+ *   Generic pointer to TX queue structure.
+ * @param[in] pkts
+ *   Packets to transmit.
+ * @param pkts_n
+ *   Number of packets in array.
+ *
+ * @return
+ *   Number of packets successfully transmitted (<= pkts_n).
+ */
+uint16_t
+mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
+{
+	struct ftxq *txq = (struct ftxq *)dpdk_txq;
+	uint16_t elts_head = txq->elts_head;
+	const unsigned int elts_n = txq->elts_n;
+	unsigned int i;
+	unsigned int max;
+	volatile struct mlx5_wqe64 *wqe;
+	struct rte_mbuf *buf = pkts[0];
+
+	/* Prefetch first packet cacheline. */
+	tx_prefetch_cqe(txq, txq->cq_ci);
+	tx_prefetch_cqe(txq, txq->cq_ci + 1);
+	rte_prefetch0(buf);
+	/* Start processing. */
+	txq_complete(txq);
+	max = (elts_n - (elts_head - txq->elts_tail));
+	if (max > elts_n)
+		max -= elts_n;
+	assert(max >= 1);
+	assert(max <= elts_n);
+	/* Always leave one free entry in the ring. */
+	--max;
+	if (max == 0)
+		return 0;
+	if (max > pkts_n)
+		max = pkts_n;
+	for (i = 0; (i != max); ++i) {
+		struct rte_mbuf *buf_next = pkts[i + 1];
+		unsigned int elts_head_next = (elts_head + 1) & (elts_n - 1);
+#ifdef MLX5_PMD_SOFT_COUNTERS
+		unsigned int sent_size = 0;
+#endif
+		uintptr_t addr;
+		uint32_t length;
+		uint32_t lkey;
+		uintptr_t buf_next_addr;
+
+		wqe = &(*txq->wqes)[txq->wqe_ci &  (txq->wqe_cnt - 1)];
+		rte_prefetch0(wqe);
+		if (i + 1 < max)
+			rte_prefetch0(buf_next);
+		/* Should we enable HW CKSUM offload */
+		if (buf->ol_flags &
+		    (PKT_TX_IP_CKSUM | PKT_TX_TCP_CKSUM | PKT_TX_UDP_CKSUM)) {
+			wqe->eseg.cs_flags = MLX5_ETH_WQE_L3_CSUM |
+				MLX5_ETH_WQE_L4_CSUM;
+#if 0 /* Currently IBV_EXP_QP_BURST_TUNNEL is not used anywhere else. */
+			/* HW does not support checksum offloads at arbitrary
+			 * offsets but automatically recognizes the packet
+			 * type. For inner L3/L4 checksums, only VXLAN (UDP)
+			 * tunnels are currently supported. */
+			if (RTE_ETH_IS_TUNNEL_PKT(buf->packet_type))
+				send_flags |= IBV_EXP_QP_BURST_TUNNEL;
+#endif
+		}
+		/* Retrieve buffer information. */
+		addr = rte_pktmbuf_mtod(buf, uintptr_t);
+		length = DATA_LEN(buf);
+		/* Update element. */
+		(*txq->elts)[elts_head] = buf;
+		/* Prefetch next buffer data. */
+		if (i + 1 < max) {
+			buf_next_addr =
+				rte_pktmbuf_mtod(buf_next, uintptr_t);
+			rte_prefetch0((volatile void *)
+				      (uintptr_t)buf_next_addr);
+		}
 		if (length <= MLX5_PMD_MAX_INLINE)
 			if (buf->ol_flags & PKT_TX_VLAN_PKT)
 				mlx5_wqe_write_inline_vlan(txq, wqe,
@@ -686,7 +803,6 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			else
 				mlx5_wqe_write_inline(txq, wqe, addr, length);
 		else
-#endif
 		{
 			/* Retrieve Memory Region key for this memory pool. */
 			lkey = txq_mp2mr(txq, txq_mb2mp(buf));
@@ -723,6 +839,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	txq->elts_head = elts_head;
 	return i;
 }
+#endif /* MLX5_PMD_MAX_INLINE > 0 */
 
 /**
  * Translate RX completion flags to packet type.

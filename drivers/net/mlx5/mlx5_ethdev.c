@@ -936,8 +936,8 @@ priv_set_link(struct priv *priv, int up)
 		err = priv_set_flags(priv, ~IFF_UP, IFF_UP);
 		if (err)
 			return err;
-		dev->rx_pkt_burst = mlx5_rx_burst;
-		dev->tx_pkt_burst = mlx5_tx_burst;
+		priv_select_tx_function(priv);
+		priv_select_rx_function(priv);
 	} else {
 		err = priv_set_flags(priv, ~IFF_UP, ~IFF_UP);
 		if (err)
@@ -1127,12 +1127,15 @@ mlx5_secondary_data_setup(struct priv *priv)
 	rte_mb();
 	priv->dev->data = &sd->data;
 	rte_mb();
-	priv->dev->tx_pkt_burst = mlx5_tx_burst;
-	priv->dev->rx_pkt_burst = removed_rx_burst;
+	priv_select_tx_function(priv);
+	priv_select_rx_function(priv);
 	priv_unlock(priv);
 end:
 	/* More sanity checks. */
-	assert(priv->dev->tx_pkt_burst == mlx5_tx_burst);
+	if (priv->txqs_n >= 4)
+		assert(priv->dev->tx_pkt_burst == mlx5_tx_burst_inline);
+	else
+		assert(priv->dev->tx_pkt_burst == mlx5_tx_burst);
 	assert(priv->dev->rx_pkt_burst == removed_rx_burst);
 	assert(priv->dev->data == &sd->data);
 	rte_spinlock_unlock(&sd->lock);
@@ -1143,4 +1146,33 @@ error:
 	rte_free(rx_queues);
 	rte_spinlock_unlock(&sd->lock);
 	return NULL;
+}
+
+/**
+ * Configure the TX function to use.
+ *
+ * @param priv
+ *   Private data pointer from either primary or secondary process.
+ */
+void
+priv_select_tx_function(struct priv *priv)
+{
+#if MLX5_PMD_MAX_INLINE > 0
+	if (priv->txqs_n >= (unsigned int)txq_min_queue_inline())
+		priv->dev->tx_pkt_burst = mlx5_tx_burst_inline;
+	else
+#endif /* MLX5_PMD_MAX_INLINE > 0 */
+		priv->dev->tx_pkt_burst = mlx5_tx_burst;
+}
+
+/**
+ * Configure the RX function to use.
+ *
+ * @param priv
+ *   Private data pointer from either primary or secondary process.
+ */
+void
+priv_select_rx_function(struct priv *priv)
+{
+	priv->dev->rx_pkt_burst = mlx5_rx_burst;
 }

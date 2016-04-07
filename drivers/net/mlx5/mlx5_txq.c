@@ -67,6 +67,18 @@
 #include "mlx5_defs.h"
 
 /**
+ * Get the minimum number of Queues necessary to activate for inline feature.
+ *
+ * @return
+ *   the number of queues to activate the inline feature.
+ */
+int
+txq_min_queue_inline(void)
+{
+	return mlx5_getenv_int("MLX5_TXQ_MIN_QUEUE_INLINE");
+}
+
+/**
  * Allocate TX queue elements.
  *
  * @param txq
@@ -307,9 +319,6 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 					desc),
 			/* Max number of scatter/gather elements in a WR. */
 			.max_send_sge = 1,
-#if MLX5_PMD_MAX_INLINE > 0
-			.max_inline_data = MLX5_PMD_MAX_INLINE,
-#endif
 		},
 		.qp_type = IBV_QPT_RAW_PACKET,
 		/* Do *NOT* enable this, completions events are managed per
@@ -320,6 +329,9 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.comp_mask = (IBV_EXP_QP_INIT_ATTR_PD |
 			      IBV_EXP_QP_INIT_ATTR_RES_DOMAIN),
 	};
+	if (MLX5_PMD_MAX_INLINE &&
+	    (priv->txqs_n >= (unsigned int)txq_min_queue_inline()))
+		attr.init.cap.max_inline_data = MLX5_PMD_MAX_INLINE;
 	tmpl.qp = ibv_exp_create_qp(priv->ctx, &attr.init);
 	if (tmpl.qp == NULL) {
 		ret = (errno ? errno : EINVAL);
@@ -478,7 +490,7 @@ mlx5_tx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		      (void *)dev, (void *)txq);
 		(*priv->txqs)[idx] = &txq->ftxq;
 		/* Update send callback. */
-		dev->tx_pkt_burst = mlx5_tx_burst;
+		priv_select_tx_function(priv);
 	}
 	priv_unlock(priv);
 	return -ret;
