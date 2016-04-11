@@ -1132,10 +1132,6 @@ mlx5_secondary_data_setup(struct priv *priv)
 	priv_unlock(priv);
 end:
 	/* More sanity checks. */
-	if (priv->txqs_n >= 4)
-		assert(priv->dev->tx_pkt_burst == mlx5_tx_burst_inline);
-	else
-		assert(priv->dev->tx_pkt_burst == mlx5_tx_burst);
 	assert(priv->dev->rx_pkt_burst == removed_rx_burst);
 	assert(priv->dev->data == &sd->data);
 	rte_spinlock_unlock(&sd->lock);
