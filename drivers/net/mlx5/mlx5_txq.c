@@ -55,6 +55,7 @@
 #include <rte_malloc.h>
 #include <rte_ethdev.h>
 #include <rte_common.h>
+#include <rte_kvargs.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -66,6 +67,9 @@
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
 
+/* Device parameter to enable the MPW. */
+#define MLX5_TXQ_MPW_EN "txq_mpw_en"
+
 /**
  * Get the minimum number of Queues necessary to activate for inline feature.
  *
@@ -76,6 +80,79 @@ int
 txq_min_queue_inline(void)
 {
 	return mlx5_getenv_int("MLX5_TXQ_MIN_QUEUE_INLINE");
+}
+
+/**
+ * Verify the pair key and value are valid and store them.
+ *
+ * @param key
+ *   The key argument to verify.
+ * @param val
+ *   The value associated to the key.
+ * @param opaque
+ *   User data
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+txq_args_check(const char *key, const char *val, void *opaque)
+{
+	struct txq *txq = (struct txq *)opaque;
+
+	if ((strcmp(MLX5_TXQ_MPW_EN, key) == 0) &&
+	    (strcmp(val, "1") == 0))
+		txq->priv->mpw_en = 1;
+	else {
+		ERROR("Parameter %s unknown", key);
+
+		return EINVAL;
+	}
+
+	return 0;
+}
+
+/**
+ * Parse the pair of key,value of the device parameter.
+ *
+ * @param txq
+ *   Pointer to TX queue structure.
+ * @param devargs
+ *   The device arguments structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+txq_args(struct txq *txq, struct rte_devargs *devargs)
+{
+	static const char *params[] = {
+		MLX5_TXQ_MPW_EN,
+	};
+	struct rte_kvargs *kvlist;
+	int ret = 0;
+	int i;
+
+	if (devargs == NULL)
+		return 0;
+
+	kvlist = rte_kvargs_parse(devargs->args, params);
+	if (kvlist == NULL)
+		return 0;
+
+	/* Process parameters. */
+	for (i = 0; (i != RTE_DIM(params)); ++i) {
+		if (rte_kvargs_count(kvlist, params[i])) {
+			ret = rte_kvargs_process(kvlist, params[i],
+						 txq_args_check, txq);
+			if (ret != 0)
+				return ret;
+		}
+	}
+
+	rte_kvargs_free(kvlist);
+
+	return 0;
 }
 
 /**
@@ -269,6 +346,12 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	int ret = 0;
 
 	(void)conf; /* Thresholds configuration (ignored). */
+	ret = txq_args(&tmpl, dev->pci_dev->devargs);
+	if (ret != 0) {
+		ERROR("%p: Device argument processing failure %s",
+		      (void *)dev, strerror(ret));
+		goto error;
+	}
 	tmpl.ftxq.elts_n = desc;
 	/* Request send completion every MLX5_PMD_TX_PER_COMP_REQ packets or
 	 * at least 4 times per ring. */
@@ -386,14 +469,13 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.intf_scope = IBV_EXP_INTF_GLOBAL,
 		.intf = IBV_EXP_INTF_QP_BURST,
 		.obj = tmpl.qp,
-#if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
-		/* Multi packet send WR can only be used outside of VF. */
-		.family_flags =
-			(!priv->vf ?
-			 IBV_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR :
-			 0),
-#endif
 	};
+#if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
+	/* Multi packet send WR can only be used outside of VF. */
+	if (!priv->vf && priv->mpw_en)
+		attr.params.family_flags =
+			IBV_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR;
+#endif
 	tmpl.if_qp = ibv_exp_query_intf(priv->ctx, &attr.params, &status);
 	if (tmpl.if_qp == NULL) {
 		ret = EINVAL;

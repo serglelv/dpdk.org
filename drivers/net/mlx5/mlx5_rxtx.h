@@ -244,6 +244,39 @@ struct mlx5_wqe64 {
 	struct mlx5_wqe_data_seg dseg;
 };
 
+#define MLX5_MPW_DSEG_MAX 5
+
+struct mlx5_mpw_wqe_eseg {
+	uint32_t rsvd0;
+	uint8_t	cs_flags;
+	uint8_t	rsvd1;
+	uint16_t mss;
+	uint32_t rsvd2;
+	uint16_t inline_hdr_sz;
+};
+
+struct mlx5_mpw_wqe {
+	union {
+		struct mlx5_wqe_ctrl_seg ctrl;
+		uint32_t data[4];
+	} ctrl;
+	struct mlx5_mpw_wqe_eseg eseg;
+	struct mlx5_wqe_data_seg dseg[2];
+} __attribute__((aligned(64)));
+
+enum mlx5_mpw_state {
+	MLX5_MPW_STATE_OPENED,
+	MLX5_MPW_STATE_CLOSED,
+};
+
+struct mlx5_mpw {
+	enum mlx5_mpw_state state;
+	unsigned int num_sge;
+	unsigned int len;
+	volatile struct mlx5_mpw_wqe * wqe;
+	volatile struct mlx5_wqe_data_seg *dseg[MLX5_MPW_DSEG_MAX];
+};
+
 #define MLX5_WQE64_INL_DATA 12
 #define MLX5_WQE64_INL_DATA_OFFSET 52
 
@@ -338,6 +371,7 @@ uint16_t mlx5_tx_burst(void *, struct rte_mbuf **, uint16_t);
 #if MLX5_PMD_MAX_INLINE > 0
 uint16_t mlx5_tx_burst_inline(void *, struct rte_mbuf **, uint16_t);
 #endif /* MLX5_PMD_MAX_INLINE > 0 */
+uint16_t mlx5_tx_burst_mpw(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst_sp(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t removed_tx_burst(void *, struct rte_mbuf **, uint16_t);

@@ -105,6 +105,7 @@ struct priv {
 	unsigned int hw_vlan_strip:1; /* VLAN stripping is supported. */
 	unsigned int hw_fcs_strip:1; /* FCS stripping is supported. */
 	unsigned int vf:1; /* This is a VF device. */
+	unsigned int mpw_en:1; /* Enable Multi-Packet WQE. */
 	unsigned int pending_alarm:1; /* An alarm is pending. */
 	/* RX/TX queues. */
 	unsigned int rxqs_n; /* RX queues array size. */

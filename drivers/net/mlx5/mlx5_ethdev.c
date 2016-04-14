@@ -1153,12 +1153,18 @@ error:
 void
 priv_select_tx_function(struct priv *priv)
 {
-#if MLX5_PMD_MAX_INLINE > 0
-	if (priv->txqs_n >= (unsigned int)txq_min_queue_inline())
-		priv->dev->tx_pkt_burst = mlx5_tx_burst_inline;
+	priv->dev->tx_pkt_burst = mlx5_tx_burst;
+#if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
+	if (priv->mpw_en) {
+		priv->dev->tx_pkt_burst = mlx5_tx_burst_mpw;
+		DEBUG("Selected MPW tx function");
+	}
 	else
+#endif /* defined (HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR) */
+#if MLX5_PMD_MAX_INLINE > 0
+		if (priv->txqs_n >= (unsigned int)txq_min_queue_inline())
+			priv->dev->tx_pkt_burst = mlx5_tx_burst_inline;
 #endif /* MLX5_PMD_MAX_INLINE > 0 */
-		priv->dev->tx_pkt_burst = mlx5_tx_burst;
 }
 
 /**
