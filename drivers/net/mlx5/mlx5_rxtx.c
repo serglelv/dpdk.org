@@ -296,7 +296,6 @@ txq_mp2mr(struct ftxq *txq, const struct rte_mempool *mp)
 	return lkey;
 }
 
-#if MLX5_PMD_MAX_INLINE == 0
 static inline void
 mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	       uintptr_t addr, uint32_t length, uint32_t lkey)
@@ -357,11 +356,9 @@ mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	++txq->wqe_ci;
 }
 
-#else /* MLX5_PMD_MAX_INLINE == 0 */
-
 static inline void
-mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-	       uintptr_t addr, uint32_t length, uint32_t lkey)
+mlx5_wqe_write_full(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+		    uintptr_t addr, uint32_t length, uint32_t lkey)
 {
 	wqe->eseg = (struct mlx5_wqe_eth_seg) {
 		.rsvd0 = 0,
@@ -391,9 +388,9 @@ mlx5_wqe_write(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 }
 
 static inline void
-mlx5_wqe_write_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
-		    uintptr_t addr, uint32_t length, uint32_t lkey,
-		    uint16_t vlan_tci)
+mlx5_wqe_write_vlan_full(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
+			 uintptr_t addr, uint32_t length, uint32_t lkey,
+			 uint16_t vlan_tci)
 {
 	wqe->eseg = (struct mlx5_wqe_eth_seg) {
 		.rsvd0 = 0,
@@ -442,14 +439,10 @@ mlx5_wqe_write_inline(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	volatile struct mlx5_wqe64_inl *inl_wqe =
 		(volatile struct mlx5_wqe64_inl *)wqe;
 
-	wqe->eseg = (struct mlx5_wqe_eth_seg) {
-		.rsvd0 = 0,
-		.cs_flags = 0,
-		.rsvd1 = 0,
-		.mss = 0,
-		.rsvd2 = 0,
-	};
-
+	wqe->eseg.rsvd0 = 0;
+	wqe->eseg.rsvd1 = 0;
+	wqe->eseg.mss = 0;
+	wqe->eseg.rsvd2 = 0;
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_INLINE_HEADER_SIZE);
 	/* Copy the first 16 bytes into the inline header */
 	rte_memcpy((void *)(uintptr_t)wqe->eseg.inline_hdr_start,
@@ -503,14 +496,10 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	volatile struct mlx5_wqe64_inl *inl_wqe =
 		(volatile struct mlx5_wqe64_inl *)wqe;
 
-	wqe->eseg = (struct mlx5_wqe_eth_seg) {
-		.rsvd0 = 0,
-		.cs_flags = 0,
-		.rsvd1 = 0,
-		.mss = 0,
-		.rsvd2 = 0,
-	};
-
+	wqe->eseg.rsvd0 = 0;
+	wqe->eseg.rsvd1 = 0;
+	wqe->eseg.mss = 0;
+	wqe->eseg.rsvd2 = 0;
 	wqe->eseg.inline_hdr_sz = htons(MLX5_ETH_VLAN_INLINE_HEADER_SIZE);
 	/*
 	 * Copy 12 bytes of source & destination MAC address.
@@ -561,7 +550,6 @@ mlx5_wqe_write_inline_vlan(struct ftxq *txq, volatile struct mlx5_wqe64 *wqe,
 	/* Increase the consumer index. */
 	txq->wqe_ci += wqes_cnt;
 }
-#endif /* MLX5_PMD_MAX_INLINE == 0 */
 
 static inline void
 mlx5_tx_dbrec(struct ftxq *txq) {
@@ -664,7 +652,8 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			if (RTE_ETH_IS_TUNNEL_PKT(buf->packet_type))
 				send_flags |= IBV_EXP_QP_BURST_TUNNEL;
 #endif
-		}
+		} else
+			wqe->eseg.cs_flags = 0;
 		/* Retrieve buffer information. */
 		addr = rte_pktmbuf_mtod(buf, uintptr_t);
 		length = DATA_LEN(buf);
@@ -712,7 +701,6 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	return i;
 }
 
-#if MLX5_PMD_MAX_INLINE > 0
 /**
  * DPDK callback for TX.
  *
@@ -736,6 +724,7 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	unsigned int max;
 	volatile struct mlx5_wqe64 *wqe;
 	struct rte_mbuf *buf = pkts[0];
+	unsigned int max_inline = txq->max_inline;
 
 	/* Prefetch first packet cacheline. */
 	tx_prefetch_cqe(txq, txq->cq_ci);
@@ -783,7 +772,8 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			if (RTE_ETH_IS_TUNNEL_PKT(buf->packet_type))
 				send_flags |= IBV_EXP_QP_BURST_TUNNEL;
 #endif
-		}
+		} else
+			wqe->eseg.cs_flags = 0;
 		/* Retrieve buffer information. */
 		addr = rte_pktmbuf_mtod(buf, uintptr_t);
 		length = DATA_LEN(buf);
@@ -796,7 +786,7 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			rte_prefetch0((volatile void *)
 				      (uintptr_t)buf_next_addr);
 		}
-		if (length <= MLX5_PMD_MAX_INLINE)
+		if (length <= max_inline)
 			if (buf->ol_flags & PKT_TX_VLAN_PKT)
 				mlx5_wqe_write_inline_vlan(txq, wqe,
 							   addr, length,
@@ -808,10 +798,11 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			/* Retrieve Memory Region key for this memory pool. */
 			lkey = txq_mp2mr(txq, txq_mb2mp(buf));
 			if (buf->ol_flags & PKT_TX_VLAN_PKT)
-				mlx5_wqe_write_vlan(txq, wqe, addr, length,
-						    lkey, buf->vlan_tci);
+				mlx5_wqe_write_vlan_full(txq, wqe, addr, length,
+							 lkey, buf->vlan_tci);
 			else
-				mlx5_wqe_write(txq, wqe, addr, length, lkey);
+				mlx5_wqe_write_full(txq, wqe, addr, length,
+						    lkey);
 		}
 		if (unlikely(--txq->elts_comp == 0)) {
 			wqe->ctrl.data[2] = htonl(8);
@@ -840,7 +831,6 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	txq->elts_head = elts_head;
 	return i;
 }
-#endif /* MLX5_PMD_MAX_INLINE > 0 */
 
 static inline void
 mlx5_mpw_new(struct ftxq *txq, struct mlx5_mpw *mpw, uint32_t length)

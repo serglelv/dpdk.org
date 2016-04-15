@@ -69,17 +69,39 @@
 
 /* Device parameter to enable the MPW. */
 #define MLX5_TXQ_MPW_EN "txq_mpw_en"
+/* Device parameter to configure inline. */
+#define MLX5_TXQ_INLINE "txq_inline"
+/* Device parameter to configure minimum number of queues before activating
+ * inline send. */
+#define MLX5_TXQS_MIN_INLINE "txqs_min_inline"
 
 /**
- * Get the minimum number of Queues necessary to activate for inline feature.
+ * Convert a string argument into long
+ *
+ * @param key
+ *   The key argument to verify.
+ * @param val
+ *   The value associated to the key.
+ * @param value
+ *   Pointer to the user value.
  *
  * @return
- *   the number of queues to activate the inline feature.
+ *   0 on success, errno value on failure.
  */
-int
-txq_min_queue_inline(void)
+static int
+txq_args_convert(const char *key, const char *val, unsigned long *value)
 {
-	return mlx5_getenv_int("MLX5_TXQ_MIN_QUEUE_INLINE");
+	char *endptr;
+
+	*value = strtol(val, &endptr, 10);
+	if ((*value == (unsigned long)LONG_MIN) ||
+	    (*value == (unsigned long)LONG_MAX)) {
+		ERROR("Parameter %s with wrong value", key);
+
+		return ERANGE;
+	}
+
+	return 0;
 }
 
 /**
@@ -103,7 +125,28 @@ txq_args_check(const char *key, const char *val, void *opaque)
 	if ((strcmp(MLX5_TXQ_MPW_EN, key) == 0) &&
 	    (strcmp(val, "1") == 0))
 		txq->priv->mpw_en = 1;
-	else {
+	else if (strcmp(MLX5_TXQ_INLINE, key) == 0) {
+		unsigned long value;
+		int ret;
+
+		ret = txq_args_convert(key, val, &value);
+		if (ret != 0) {
+			txq->ftxq.max_inline = 0;
+			txq->priv->txq_inline = 0;
+		} else {
+			txq->ftxq.max_inline = value;
+			txq->priv->txq_inline = 1;
+		}
+	} else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0) {
+		unsigned long value;
+		int ret;
+
+		ret = txq_args_convert(key, val, &value);
+		if (ret != 0)
+			txq->priv->txqs_inline = 0;
+		else
+			txq->priv->txqs_inline = value;
+	} else {
 		ERROR("Parameter %s unknown", key);
 
 		return EINVAL;
@@ -128,6 +171,8 @@ txq_args(struct txq *txq, struct rte_devargs *devargs)
 {
 	static const char *params[] = {
 		MLX5_TXQ_MPW_EN,
+		MLX5_TXQ_INLINE,
+		MLX5_TXQS_MIN_INLINE,
 	};
 	struct rte_kvargs *kvlist;
 	int ret = 0;
@@ -412,9 +457,8 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		.comp_mask = (IBV_EXP_QP_INIT_ATTR_PD |
 			      IBV_EXP_QP_INIT_ATTR_RES_DOMAIN),
 	};
-	if (MLX5_PMD_MAX_INLINE &&
-	    (priv->txqs_n >= (unsigned int)txq_min_queue_inline()))
-		attr.init.cap.max_inline_data = MLX5_PMD_MAX_INLINE;
+	if (priv->txq_inline && priv->txqs_n >= priv->txqs_inline)
+		attr.init.cap.max_inline_data = tmpl.ftxq.max_inline;
 	tmpl.qp = ibv_exp_create_qp(priv->ctx, &attr.init);
 	if (tmpl.qp == NULL) {
 		ret = (errno ? errno : EINVAL);

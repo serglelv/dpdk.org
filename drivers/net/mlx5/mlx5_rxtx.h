@@ -299,6 +299,7 @@ struct ftxq {
 	uint16_t wqe_cnt;
 	uint16_t bf_offset;
 	uint16_t bf_buf_size;
+	uint16_t max_inline; /* Maximum size to inline in a WQE. */
 	volatile struct mlx5_cqe64 (*cqes)[];
 	volatile struct mlx5_wqe64 (*wqes)[];
 	volatile uint32_t *qp_db;
@@ -357,8 +358,6 @@ uint16_t mlx5_rx_burst_secondary_setup(void *dpdk_rxq, struct rte_mbuf **pkts,
 void txq_cleanup(struct txq *);
 int txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	  unsigned int socket, const struct rte_eth_txconf *conf);
-int txq_min_queue_inline(void);
-
 int mlx5_tx_queue_setup(struct rte_eth_dev *, uint16_t, uint16_t, unsigned int,
 			const struct rte_eth_txconf *);
 void mlx5_tx_queue_release(void *);
@@ -368,9 +367,7 @@ uint16_t mlx5_tx_burst_secondary_setup(void *dpdk_txq, struct rte_mbuf **pkts,
 /* mlx5_rxtx.c */
 
 uint16_t mlx5_tx_burst(void *, struct rte_mbuf **, uint16_t);
-#if MLX5_PMD_MAX_INLINE > 0
 uint16_t mlx5_tx_burst_inline(void *, struct rte_mbuf **, uint16_t);
-#endif /* MLX5_PMD_MAX_INLINE > 0 */
 uint16_t mlx5_tx_burst_mpw(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst_sp(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst(void *, struct rte_mbuf **, uint16_t);
