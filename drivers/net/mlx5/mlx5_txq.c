@@ -390,6 +390,8 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	enum ibv_exp_query_intf_status status;
 	int ret = 0;
 
+	if (mlx5_getenv_int("MLX5_ENABLE_CQE_COMPRESSION"))
+		rte_panic("MLX5_ENABLE_CQE_COMPRESSION should not be set\n");
 	(void)conf; /* Thresholds configuration (ignored). */
 	ret = txq_args(&tmpl, dev->pci_dev->devargs);
 	if (ret != 0) {
