@@ -63,6 +63,8 @@
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
 
+#define MLX5_MWQE64_INL_DATA 28
+
 struct mlx5_rxq_stats {
 	unsigned int idx; /**< Mapping index. */
 #ifdef MLX5_PMD_SOFT_COUNTERS
@@ -264,17 +266,36 @@ struct mlx5_mpw_wqe {
 	struct mlx5_wqe_data_seg dseg[2];
 } __attribute__((aligned(64)));
 
+struct mlx5_mpw_inl_wqe {
+	union {
+		struct mlx5_wqe_ctrl_seg ctrl;
+		uint32_t data[4];
+	} ctrl;
+	struct mlx5_mpw_wqe_eseg eseg;
+	uint32_t byte_cnt;
+	uint8_t data[MLX5_MWQE64_INL_DATA];
+} __attribute__((aligned(64)));
+
 enum mlx5_mpw_state {
 	MLX5_MPW_STATE_OPENED,
+	MLX5_MPW_INL_STATE_OPENED,
 	MLX5_MPW_STATE_CLOSED,
 };
 
 struct mlx5_mpw {
 	enum mlx5_mpw_state state;
-	unsigned int num_sge;
+	unsigned int pkts_n;
 	unsigned int len;
-	volatile struct mlx5_mpw_wqe * wqe;
-	volatile struct mlx5_wqe_data_seg *dseg[MLX5_MPW_DSEG_MAX];
+	unsigned int total_len;
+	union {
+		volatile struct mlx5_mpw_wqe *noinl;
+		volatile struct mlx5_mpw_inl_wqe *inl;
+	} wqe;
+	union {
+		volatile struct mlx5_wqe_data_seg *dseg[MLX5_MPW_DSEG_MAX];
+		volatile uint8_t *raw;
+	} data;
+	unsigned int remaining_n;
 };
 
 #define MLX5_WQE64_INL_DATA 12
@@ -369,6 +390,7 @@ uint16_t mlx5_tx_burst_secondary_setup(void *dpdk_txq, struct rte_mbuf **pkts,
 uint16_t mlx5_tx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_tx_burst_inline(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_tx_burst_mpw(void *, struct rte_mbuf **, uint16_t);
+uint16_t mlx5_tx_burst_mpw_inline(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst_sp(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t removed_tx_burst(void *, struct rte_mbuf **, uint16_t);
