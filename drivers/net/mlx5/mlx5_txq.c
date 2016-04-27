@@ -310,7 +310,7 @@ txq_ctrl_setup(struct rte_eth_dev *dev, struct txq_ctrl *txq_ctrl,
 					priv->device_attr.max_qp_wr :
 					desc),
 			/* Max number of scatter/gather elements in a WR. */
-			.max_send_sge = 1,
+			.max_send_sge = priv->device_attr.max_sge,
 		},
 		.qp_type = IBV_QPT_RAW_PACKET,
 		/* Do *NOT* enable this, completions events are managed per
