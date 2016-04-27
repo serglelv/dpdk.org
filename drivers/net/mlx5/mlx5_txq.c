@@ -468,6 +468,12 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
+	if (priv->txq_inline && priv->txqs_n >= priv->txqs_inline) {
+		if (tmpl.ftxq.max_inline != attr.init.cap.max_inline_data)
+			WARN("%p: Max TX inline updated to %u",
+			     (void *)dev, attr.init.cap.max_inline_data);
+		tmpl.ftxq.max_inline = attr.init.cap.max_inline_data;
+	}
 	attr.mod = (struct ibv_exp_qp_attr){
 		/* Move the QP to this state. */
 		.qp_state = IBV_QPS_INIT,
