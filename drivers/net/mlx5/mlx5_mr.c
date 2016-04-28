@@ -112,35 +112,39 @@ mlx5_mp2mr(struct ibv_pd *pd, const struct rte_mempool *mp)
  *   mr->lkey on success, (uint32_t)-1 on failure.
  */
 uint32_t
-txq_mp2mr_reg(struct txq *txq, const struct rte_mempool *mp, unsigned int idx)
+txq_mp2mr_reg(struct txq *txq, const struct rte_mempool *mp,
+	      unsigned int idx)
 {
+	struct txq_ctrl *txq_ctrl = container_of(txq, struct txq_ctrl, txq);
 	struct ibv_mr *mr;
 
 	/* Add a new entry, register MR first. */
 	DEBUG("%p: discovered new memory pool \"%s\" (%p)",
-	      (void *)txq, mp->name, (const void *)mp);
-	mr = mlx5_mp2mr(txq->priv->pd, mp);
+	      (void *)txq_ctrl, mp->name, (const void *)mp);
+	mr = mlx5_mp2mr(txq_ctrl->txq.priv->pd, mp);
 	if (unlikely(mr == NULL)) {
 		DEBUG("%p: unable to configure MR, ibv_reg_mr() failed.",
 		      (void *)txq);
 		return (uint32_t)-1;
 	}
-	if (unlikely(idx == RTE_DIM(txq->mp2mr))) {
+	if (unlikely(idx == RTE_DIM(txq_ctrl->txq.mp2mr))) {
 		/* Table is full, remove oldest entry. */
 		DEBUG("%p: MR <-> MP table full, dropping oldest entry.",
 		      (void *)txq);
 		--idx;
-		claim_zero(ibv_dereg_mr(txq->mp2mr[0].mr));
-		memmove(&txq->mp2mr[0], &txq->mp2mr[1],
-			(sizeof(txq->mp2mr) - sizeof(txq->mp2mr[0])));
+		claim_zero(ibv_dereg_mr(txq_ctrl->txq.mp2mr[0].mr));
+		memmove(&txq_ctrl->txq.mp2mr[0], &txq_ctrl->txq.mp2mr[1],
+			(sizeof(txq_ctrl->txq.mp2mr) -
+			 sizeof(txq_ctrl->txq.mp2mr[0])));
 	}
 	/* Store the new entry. */
-	txq->mp2mr[idx].mp = mp;
-	txq->mp2mr[idx].mr = mr;
-	txq->mp2mr[idx].lkey = mr->lkey;
+	txq_ctrl->txq.mp2mr[idx].mp = mp;
+	txq_ctrl->txq.mp2mr[idx].mr = mr;
+	txq_ctrl->txq.mp2mr[idx].lkey = mr->lkey;
 	DEBUG("%p: new MR lkey for MP \"%s\" (%p): 0x%08" PRIu32,
-	      (void *)txq, mp->name, (const void *)mp, txq->mp2mr[idx].lkey);
-	return txq->mp2mr[idx].lkey;
+	      (void *)txq, mp->name, (const void *)mp,
+	      txq_ctrl->txq.mp2mr[idx].lkey);
+	return txq_ctrl->txq.mp2mr[idx].lkey;
 }
 
 struct txq_mp2mr_mbuf_check_data {
@@ -195,7 +199,7 @@ txq_mp2mr_mbuf_check(void *arg, void *start, void *end,
 void
 txq_mp2mr_iter(const struct rte_mempool *mp, void *arg)
 {
-	struct txq *txq = arg;
+	struct txq_ctrl *txq_ctrl = arg;
 	struct txq_mp2mr_mbuf_check_data data = {
 		.mp = mp,
 		.ret = -1,
@@ -217,13 +221,13 @@ txq_mp2mr_iter(const struct rte_mempool *mp, void *arg)
 			     &data);
 	if (data.ret)
 		return;
-	for (i = 0; (i != RTE_DIM(txq->mp2mr)); ++i) {
-		if (unlikely(txq->mp2mr[i].mp == NULL)) {
+	for (i = 0; (i != RTE_DIM(txq_ctrl->txq.mp2mr)); ++i) {
+		if (unlikely(txq_ctrl->txq.mp2mr[i].mp == NULL)) {
 			/* Unknown MP, add a new MR for it. */
 			break;
 		}
-		if (txq->mp2mr[i].mp == mp)
+		if (txq_ctrl->txq.mp2mr[i].mp == mp)
 			return;
 	}
-	txq_mp2mr_reg(txq, mp, i);
+	txq_mp2mr_reg(&txq_ctrl->txq, mp, i);
 }
