@@ -1180,10 +1180,14 @@ priv_select_tx_function(struct priv *priv)
 {
 	priv->dev->tx_pkt_burst = mlx5_tx_burst;
 #if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
-	if (priv->mps && priv->txq_inline) {
+	/* Handle impossible cases to display a warning. */
+	if (priv->sriov && priv->mps)
+		WARN("Multi-Packet WQE is not possible with SR-IOV");
+
+	if ((priv->sriov == 0) && priv->mps && priv->txq_inline) {
 		priv->dev->tx_pkt_burst = mlx5_tx_burst_mpw_inline;
 		DEBUG("Selected MPW-inline Tx function");
-	} else if (priv->mps) {
+	} else if ((priv->sriov == 0) && priv->mps) {
 		priv->dev->tx_pkt_burst = mlx5_tx_burst_mpw;
 		DEBUG("Selected MPW tx function");
 	} else

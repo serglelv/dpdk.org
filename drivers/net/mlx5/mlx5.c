@@ -57,6 +57,7 @@
 #include <rte_ethdev.h>
 #include <rte_pci.h>
 #include <rte_common.h>
+#include <rte_kvargs.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -66,6 +67,14 @@
 #include "mlx5_rxtx.h"
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
+
+/* Device parameter to configure inline. */
+#define MLX5_TXQ_INLINE "txq_inline"
+/* Device parameter to configure minimum number of queues before activating
+ *  * inline send. */
+#define MLX5_TXQS_MIN_INLINE "txqs_min_inline"
+/* Device parameter to enable the MPW. */
+#define MLX5_TXQ_MPW_EN "txq_mpw_en"
 
 /**
  * Retrieve integer value from environment variable.
@@ -232,6 +241,128 @@ mlx5_dev_idx(struct rte_pci_addr *pci_addr)
 			ret = i;
 	}
 	return ret;
+}
+
+/**
+ * Convert a string argument to long.
+ *
+ * @param key
+ *   Key argument to verify.
+ * @param val
+ *   Value associated with key.
+ * @param value
+ *   Pointer to user value.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+mlx5_args_convert(const char *key, const char *val, unsigned long *value)
+{
+	char *endptr;
+
+	*value = strtol(val, &endptr, 10);
+	if ((*value == (unsigned long)LONG_MIN) ||
+	    (*value == (unsigned long)LONG_MAX)) {
+		ERROR("parameter %s has wrong value", key);
+
+		return ERANGE;
+	}
+
+	return 0;
+}
+
+/**
+ * Verify and store value for device argument.
+ *
+ * @param key
+ *   Key argument to verify.
+ * @param val
+ *   Value associated with key.
+ * @param opaque
+ *   User data
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+mlx5_args_check(const char *key, const char *val, void *opaque)
+{
+	struct priv *priv = opaque;
+
+	if (strcmp(MLX5_TXQ_INLINE, key) == 0) {
+		unsigned long value;
+		int ret;
+
+		ret = mlx5_args_convert(key, val, &value);
+		if (ret != 0)
+			priv->txq_inline = 0;
+		else
+			priv->txq_inline = value;
+	} else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0) {
+		unsigned long value;
+		int ret;
+
+		ret = mlx5_args_convert(key, val, &value);
+		if (ret != 0)
+			priv->txqs_inline = 0;
+		else
+			priv->txqs_inline = value;
+	} else if ((strcmp(MLX5_TXQ_MPW_EN, key) == 0) &&
+	    (strcmp(val, "1") == 0))
+		priv->mps = 1;
+	else {
+		ERROR("Parameter %s unknown", key);
+
+		return EINVAL;
+	}
+
+	return 0;
+}
+
+/**
+ * Parse device parameters.
+ *
+ * @param priv
+ *   Pointer to private structure.
+ * @param devargs
+ *   Device arguments structure.
+ *
+ * @return
+ *   0 on success, errno value on failure.
+ */
+static int
+mlx5_args(struct priv *priv, struct rte_devargs *devargs)
+{
+	static const char *params[] = {
+		MLX5_TXQ_INLINE,
+		MLX5_TXQS_MIN_INLINE,
+		MLX5_TXQ_MPW_EN,
+	};
+	struct rte_kvargs *kvlist;
+	int ret = 0;
+	int i;
+
+	if (devargs == NULL)
+		return 0;
+
+	kvlist = rte_kvargs_parse(devargs->args, params);
+	if (kvlist == NULL)
+		return 0;
+
+	/* Process parameters. */
+	for (i = 0; (i != RTE_DIM(params)); ++i) {
+		if (rte_kvargs_count(kvlist, params[i])) {
+			ret = rte_kvargs_process(kvlist, params[i],
+						 mlx5_args_check, priv);
+			if (ret != 0)
+				return ret;
+		}
+	}
+
+	rte_kvargs_free(kvlist);
+
+	return 0;
 }
 
 static struct eth_driver mlx5_driver;
@@ -409,6 +540,12 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		priv->pd = pd;
 		priv->mtu = ETHER_MTU;
 #ifdef HAVE_EXP_QUERY_DEVICE
+		err = mlx5_args(priv, pci_dev->devargs);
+		if (err) {
+			ERROR("failed to process device arguments: %s",
+			      strerror(err));
+			goto port_error;
+		}
 		if (ibv_exp_query_device(ctx, &exp_device_attr)) {
 			ERROR("ibv_exp_query_device() failed");
 			goto port_error;
