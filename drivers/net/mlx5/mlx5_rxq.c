@@ -889,6 +889,7 @@ rxq_setup(struct rxq_ctrl *tmpl, struct rxq_ctrl *rxq_ctrl)
 	struct mlx5_rwq *rwq = container_of(tmpl->wq, struct mlx5_rwq, wq);
 
 	tmpl->rxq.rq_db = rwq->rq.db;
+	tmpl->rxq.cqe_n = ibcq->cqe + 1;
 	tmpl->rxq.cq_ci = 0;
 	tmpl->rxq.rq_ci = 0;
 	tmpl->rxq.cq_db = cq->dbrec;
@@ -982,10 +983,12 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 		goto error;
 	}
 	attr.cq = (struct ibv_exp_cq_init_attr){
-		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
+		.comp_mask = (IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN |
+			      IBV_EXP_CQ_INIT_ATTR_FLAGS),
+		.flags = IBV_EXP_CQ_COMPRESSED_CQE,
 		.res_domain = tmpl.rd,
 	};
-	tmpl.cq = ibv_exp_create_cq(priv->ctx, desc - 1, NULL, NULL, 0,
+	tmpl.cq = ibv_exp_create_cq(priv->ctx, (2 * desc) - 1, NULL, NULL, 0,
 				    &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
