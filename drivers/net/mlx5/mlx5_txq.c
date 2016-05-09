@@ -251,6 +251,10 @@ txq_free_elts(struct txq *txq)
 
 	DEBUG("%p: freeing WRs", (void *)txq);
 	txq->ftxq.elts_n = 0;
+
+	if (txq->ftxq.elts == NULL)
+		return;
+
 	for (i = 0; (i != elts_n); ++i) {
 		if ((*txq->ftxq.elts)[i] == NULL)
 			continue;
