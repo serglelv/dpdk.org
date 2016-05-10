@@ -528,7 +528,7 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	};
 #if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
 	/* Multi packet send WR can only be used outside of VF. */
-	if (!priv->vf && priv->mpw_en)
+	if (!priv->sriov && priv->mpw_en)
 		attr.params.family_flags =
 			IBV_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR;
 #endif

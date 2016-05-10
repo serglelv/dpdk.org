@@ -363,6 +363,31 @@ priv_ifreq(const struct priv *priv, int req, struct ifreq *ifr)
 }
 
 /**
+ * Get number of present VFs on the device
+ *
+ * @param priv
+ *   Pointer to private structure.
+ * @param[out] num_vfs
+ *   Number of active VFs value output buffer.
+ *
+ * @return
+ *   0 on success, -1 on failure and errno is set.
+ */
+int
+priv_get_num_vfs(struct priv *priv, uint16_t *num_vfs)
+{
+	unsigned long ulong_num_vfs;
+	int ret;
+
+	ret = priv_get_sysfs_ulong(priv, "device/sriov_numvfs",
+				   &ulong_num_vfs);
+	if (ret == -1)
+		return -1;
+	*num_vfs = ulong_num_vfs;
+	return 0;
+}
+
+/**
  * Get device MTU.
  *
  * @param priv

@@ -104,7 +104,7 @@ struct priv {
 	unsigned int hw_csum_l2tun:1; /* Same for L2 tunnels. */
 	unsigned int hw_vlan_strip:1; /* VLAN stripping is supported. */
 	unsigned int hw_fcs_strip:1; /* FCS stripping is supported. */
-	unsigned int vf:1; /* This is a VF device. */
+	unsigned int sriov:1; /* This is a VF or PF with VF devices. */
 	unsigned int mpw_en:1; /* Enable Multi-Packet WQE. */
 	unsigned int pending_alarm:1; /* An alarm is pending. */
 	unsigned int txq_inline:1; /* Inline is requested for TX. */
@@ -173,6 +173,7 @@ struct priv *mlx5_get_priv(struct rte_eth_dev *dev);
 int mlx5_is_secondary(void);
 int priv_get_ifname(const struct priv *, char (*)[IF_NAMESIZE]);
 int priv_ifreq(const struct priv *, int req, struct ifreq *);
+int priv_get_num_vfs(struct priv *, uint16_t *);
 int priv_get_mtu(struct priv *, uint16_t *);
 int priv_set_flags(struct priv *, unsigned int, unsigned int);
 int mlx5_dev_configure(struct rte_eth_dev *);
