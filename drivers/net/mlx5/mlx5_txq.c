@@ -124,7 +124,7 @@ txq_args_check(const char *key, const char *val, void *opaque)
 
 	if ((strcmp(MLX5_TXQ_MPW_EN, key) == 0) &&
 	    (strcmp(val, "1") == 0))
-		txq->priv->mpw_en = 1;
+		txq->priv->mps = 1;
 	else if (strcmp(MLX5_TXQ_INLINE, key) == 0) {
 		unsigned long value;
 		int ret;
@@ -528,7 +528,7 @@ txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
 	};
 #if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
 	/* Multi packet send WR can only be used outside of VF. */
-	if (!priv->sriov && priv->mpw_en)
+	if (!priv->sriov && priv->mps)
 		attr.params.family_flags =
 			IBV_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR;
 #endif

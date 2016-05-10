@@ -105,7 +105,7 @@ struct priv {
 	unsigned int hw_vlan_strip:1; /* VLAN stripping is supported. */
 	unsigned int hw_fcs_strip:1; /* FCS stripping is supported. */
 	unsigned int sriov:1; /* This is a VF or PF with VF devices. */
-	unsigned int mpw_en:1; /* Enable Multi-Packet WQE. */
+	unsigned int mps:1; /* Whether multi-packet send is supported. */
 	unsigned int pending_alarm:1; /* An alarm is pending. */
 	unsigned int txq_inline:1; /* Inline is requested for TX. */
 	unsigned int txqs_inline; /* Minimum of queues to activate inline */

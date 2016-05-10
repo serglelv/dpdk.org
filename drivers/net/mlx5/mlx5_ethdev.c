@@ -1180,10 +1180,10 @@ priv_select_tx_function(struct priv *priv)
 {
 	priv->dev->tx_pkt_burst = mlx5_tx_burst;
 #if defined(HAVE_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR)
-	if (priv->mpw_en && priv->txq_inline) {
+	if (priv->mps && priv->txq_inline) {
 		priv->dev->tx_pkt_burst = mlx5_tx_burst_mpw_inline;
 		DEBUG("Selected MPW-inline Tx function");
-	} else if (priv->mpw_en) {
+	} else if (priv->mps) {
 		priv->dev->tx_pkt_burst = mlx5_tx_burst_mpw;
 		DEBUG("Selected MPW tx function");
 	} else
