@@ -586,11 +586,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		priv->ind_table_max_size = RSS_INDIRECTION_TABLE_SIZE;
 #endif /* HAVE_EXP_QUERY_DEVICE */
 
-		err = priv_get_num_vfs(priv, &num_vfs);
-		if (err) {
-			WARN("cannot read sysfs num_vfs entry (errno: %s)",
-			      strerror(errno));
-		}
+		priv_get_num_vfs(priv, &num_vfs);
 		priv->sriov = (num_vfs || sriov);
 		priv->mps = mps;
 		/* Allocate and register default RSS hash keys. */
