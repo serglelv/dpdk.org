@@ -379,11 +379,19 @@ priv_get_num_vfs(struct priv *priv, uint16_t *num_vfs)
 	unsigned long ulong_num_vfs;
 	int ret;
 
+	*num_vfs = 0;
 	ret = priv_get_sysfs_ulong(priv, "device/sriov_numvfs",
 				   &ulong_num_vfs);
-	if (ret == -1)
-		return -1;
+	if (ret == -1) {
+		/* Depending on the operating system, the file may not have
+		 * the same name. */
+		ret = priv_get_sysfs_ulong(priv, "device/mlx5_num_vfs",
+				&ulong_num_vfs);
+		if (ret == -1)
+			return -1;
+	}
 	*num_vfs = ulong_num_vfs;
+
 	return 0;
 }
 

@@ -588,9 +588,8 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 
 		err = priv_get_num_vfs(priv, &num_vfs);
 		if (err) {
-			ERROR("cannot read sysfs num_vfs entry (errno: %s)",
+			WARN("cannot read sysfs num_vfs entry (errno: %s)",
 			      strerror(errno));
-			goto port_error;
 		}
 		priv->sriov = (num_vfs || sriov);
 		priv->mps = mps;
