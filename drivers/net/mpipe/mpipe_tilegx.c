@@ -502,7 +502,7 @@ mpipe_recv_fill_stack(struct mpipe_dev_priv *priv, int count)
 	int i;
 
 	for (i = 0; i < count; i++) {
-		mbuf = __rte_mbuf_raw_alloc(priv->rx_mpool);
+		mbuf = rte_mbuf_raw_alloc(priv->rx_mpool);
 		if (!mbuf)
 			break;
 		mpipe_recv_push(priv, mbuf);
@@ -1445,7 +1445,7 @@ mpipe_do_recv(struct mpipe_rx_queue *rx_queue, struct rte_mbuf **rx_pkts,
 				continue;
 			}
 
-			mbuf = __rte_mbuf_raw_alloc(priv->rx_mpool);
+			mbuf = rte_mbuf_raw_alloc(priv->rx_mpool);
 			if (unlikely(!mbuf)) {
 				nb_nomem++;
 				gxio_mpipe_iqueue_drop(iqueue, idesc);

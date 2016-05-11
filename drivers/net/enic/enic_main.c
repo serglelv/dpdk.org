@@ -80,16 +80,6 @@ static int is_eth_addr_valid(uint8_t *addr)
 	return !is_mcast_addr(addr) && !is_zero_addr(addr);
 }
 
-static inline struct rte_mbuf *
-enic_rxmbuf_alloc(struct rte_mempool *mp)
-{
-	struct rte_mbuf *m;
-
-	m = __rte_mbuf_raw_alloc(mp);
-	__rte_mbuf_sanity_check_raw(m, 0);
-	return m;
-}
-
 void enic_set_hdr_split_size(struct enic *enic, u16 split_hdr_size)
 {
 	vnic_set_hdr_split_size(enic->vdev, split_hdr_size);
@@ -321,7 +311,7 @@ static int enic_rq_alloc_buf(struct vnic_rq *rq)
 	struct rq_enet_desc *desc = vnic_rq_next_desc(rq);
 	uint8_t type = RQ_ENET_TYPE_ONLY_SOP;
 	u16 split_hdr_size = vnic_get_hdr_split_size(enic->vdev);
-	struct rte_mbuf *mbuf = enic_rxmbuf_alloc(rq->mp);
+	struct rte_mbuf *mbuf = rte_mbuf_raw_alloc(rq->mp);
 	struct rte_mbuf *hdr_mbuf = NULL;
 
 	if (!mbuf) {
@@ -334,7 +324,7 @@ static int enic_rq_alloc_buf(struct vnic_rq *rq)
 			rte_mempool_put(mbuf->pool, mbuf);
 			return -1;
 		}
-		hdr_mbuf = enic_rxmbuf_alloc(rq->mp);
+		hdr_mbuf = rte_mbuf_raw_alloc(rq->mp);
 		if (!hdr_mbuf) {
 			rte_mempool_put(mbuf->pool, mbuf);
 			dev_err(enic,

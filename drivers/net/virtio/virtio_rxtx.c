@@ -254,17 +254,6 @@ virtqueue_enqueue_xmit(struct virtqueue *txvq, struct rte_mbuf *cookie)
 	return 0;
 }
 
-static inline struct rte_mbuf *
-rte_rxmbuf_alloc(struct rte_mempool *mp)
-{
-	struct rte_mbuf *m;
-
-	m = __rte_mbuf_raw_alloc(mp);
-	__rte_mbuf_sanity_check_raw(m, 0);
-
-	return m;
-}
-
 static void
 virtio_dev_vring_start(struct virtqueue *vq, int queue_type)
 {
@@ -318,7 +307,7 @@ virtio_dev_vring_start(struct virtqueue *vq, int queue_type)
 			vq->sw_ring[vq->vq_nentries + i] = &vq->fake_mbuf;
 
 		while (!virtqueue_full(vq)) {
-			m = rte_rxmbuf_alloc(vq->mpool);
+			m = rte_mbuf_raw_alloc(vq->mpool);
 			if (m == NULL)
 				break;
 
@@ -635,7 +624,7 @@ virtio_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts, uint16_t nb_pkts)
 	/* Allocate new mbuf for the used descriptor */
 	error = ENOSPC;
 	while (likely(!virtqueue_full(rxvq))) {
-		new_mbuf = rte_rxmbuf_alloc(rxvq->mpool);
+		new_mbuf = rte_mbuf_raw_alloc(rxvq->mpool);
 		if (unlikely(new_mbuf == NULL)) {
 			struct rte_eth_dev *dev
 				= &rte_eth_devices[rxvq->port_id];
@@ -801,7 +790,7 @@ virtio_recv_mergeable_pkts(void *rx_queue,
 	/* Allocate new mbuf for the used descriptor */
 	error = ENOSPC;
 	while (likely(!virtqueue_full(rxvq))) {
-		new_mbuf = rte_rxmbuf_alloc(rxvq->mpool);
+		new_mbuf = rte_mbuf_raw_alloc(rxvq->mpool);
 		if (unlikely(new_mbuf == NULL)) {
 			struct rte_eth_dev *dev
 				= &rte_eth_devices[rxvq->port_id];

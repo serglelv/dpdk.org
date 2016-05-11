@@ -1592,7 +1592,7 @@ txmbuf_clean_zcp(struct virtio_net *dev, struct vpool *vpool)
 		dev->device_fh, rte_ring_count(vpool->ring));
 
 	for (index = 0; index < mbuf_count; index++) {
-		mbuf = __rte_mbuf_raw_alloc(vpool->pool);
+		mbuf = rte_mbuf_raw_alloc(vpool->pool);
 		if (likely(MBUF_EXT_MEM(mbuf)))
 			pktmbuf_detach_zcp(mbuf);
 		rte_ring_sp_enqueue(vpool->ring, mbuf);
@@ -1654,7 +1654,7 @@ static void mbuf_destroy_zcp(struct vpool *vpool)
 		rte_ring_count(vpool->ring));
 
 	for (index = 0; index < mbuf_count; index++) {
-		mbuf = __rte_mbuf_raw_alloc(vpool->pool);
+		mbuf = rte_mbuf_raw_alloc(vpool->pool);
 		if (likely(mbuf != NULL)) {
 			if (likely(MBUF_EXT_MEM(mbuf)))
 				pktmbuf_detach_zcp(mbuf);
@@ -3058,7 +3058,7 @@ main(int argc, char *argv[])
 			 */
 			for (i = 0; i < count_in_mempool; i++) {
 				struct rte_mbuf *mbuf
-					= __rte_mbuf_raw_alloc(
+					= rte_mbuf_raw_alloc(
 						vpool_array[index].pool);
 				rte_ring_sp_enqueue(vpool_array[index].ring,
 						(void *)mbuf);

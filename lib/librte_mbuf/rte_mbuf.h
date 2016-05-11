@@ -910,12 +910,6 @@ struct rte_pktmbuf_pool_private {
 /**  check mbuf type in debug mode */
 #define __rte_mbuf_sanity_check(m, is_h) rte_mbuf_sanity_check(m, is_h)
 
-/**  check mbuf type in debug mode if mbuf pointer is not null */
-#define __rte_mbuf_sanity_check_raw(m, is_h)	do {       \
-	if ((m) != NULL)                                   \
-		rte_mbuf_sanity_check(m, is_h);          \
-} while (0)
-
 /**  MBUF asserts in debug mode */
 #define RTE_MBUF_ASSERT(exp)                                         \
 if (!(exp)) {                                                        \
@@ -926,9 +920,6 @@ if (!(exp)) {                                                        \
 
 /**  check mbuf type in debug mode */
 #define __rte_mbuf_sanity_check(m, is_h) do { } while (0)
-
-/**  check mbuf type in debug mode if mbuf pointer is not null */
-#define __rte_mbuf_sanity_check_raw(m, is_h) do { } while (0)
 
 /**  MBUF asserts in debug mode */
 #define RTE_MBUF_ASSERT(exp)                do { } while (0)
@@ -1045,9 +1036,12 @@ void
 rte_mbuf_sanity_check(const struct rte_mbuf *m, int is_header);
 
 /**
- * @internal Allocate a new mbuf from mempool *mp*.
- * The use of that function is reserved for RTE internal needs.
- * Please use rte_pktmbuf_alloc().
+ * Allocate an unitialized mbuf from mempool *mp*.
+ *
+ * This function can be used by PMDs (especially in RX functions) to
+ * allocate an unitialized mbuf. The driver is responsible of
+ * initializing all the required fields. See rte_pktmbuf_reset().
+ * For standard needs, prefer rte_pktmbuf_alloc().
  *
  * @param mp
  *   The mempool from which mbuf is allocated.
@@ -1055,16 +1049,26 @@ rte_mbuf_sanity_check(const struct rte_mbuf *m, int is_header);
  *   - The pointer to the new mbuf on success.
  *   - NULL if allocation failed.
  */
-static inline struct rte_mbuf *__rte_mbuf_raw_alloc(struct rte_mempool *mp)
+static inline struct rte_mbuf *rte_mbuf_raw_alloc(struct rte_mempool *mp)
 {
 	struct rte_mbuf *m;
 	void *mb = NULL;
+
 	if (rte_mempool_get(mp, &mb) < 0)
 		return NULL;
 	m = (struct rte_mbuf *)mb;
 	RTE_MBUF_ASSERT(rte_mbuf_refcnt_read(m) == 0);
 	rte_mbuf_refcnt_set(m, 1);
+	__rte_mbuf_sanity_check(m, 0);
+
 	return m;
+}
+
+/* compat with older versions */
+__rte_deprecated static inline struct rte_mbuf *
+__rte_mbuf_raw_alloc(struct rte_mempool *mp)
+{
+	return rte_mbuf_raw_alloc(mp);
 }
 
 /**
@@ -1330,7 +1334,7 @@ static inline void rte_pktmbuf_reset(struct rte_mbuf *m)
 static inline struct rte_mbuf *rte_pktmbuf_alloc(struct rte_mempool *mp)
 {
 	struct rte_mbuf *m;
-	if ((m = __rte_mbuf_raw_alloc(mp)) != NULL)
+	if ((m = rte_mbuf_raw_alloc(mp)) != NULL)
 		rte_pktmbuf_reset(m);
 	return m;
 }
