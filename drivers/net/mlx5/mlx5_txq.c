@@ -265,13 +265,8 @@ txq_ctrl_setup(struct rte_eth_dev *dev, struct txq_ctrl *txq_ctrl,
 		goto error;
 	}
 	(void)conf; /* Thresholds configuration (ignored). */
+	assert(desc > MLX5_TX_COMP_THRESH);
 	tmpl.txq.elts_n = desc;
-	/* Request send completion every MLX5_PMD_TX_PER_COMP_REQ packets or
-	 * at least 4 times per ring. */
-	tmpl.txq.elts_comp_cd_init =
-		((MLX5_PMD_TX_PER_COMP_REQ < (desc / 4)) ?
-		 MLX5_PMD_TX_PER_COMP_REQ : (desc / 4));
-	tmpl.txq.elts_comp = tmpl.txq.elts_comp_cd_init;
 	/* MRs will be registered in mp2mr[] later. */
 	attr.rd = (struct ibv_exp_res_domain_init_attr){
 		.comp_mask = (IBV_EXP_RES_DOMAIN_THREAD_MODEL |
@@ -291,7 +286,8 @@ txq_ctrl_setup(struct rte_eth_dev *dev, struct txq_ctrl *txq_ctrl,
 		.res_domain = tmpl.rd,
 	};
 	tmpl.cq = ibv_exp_create_cq(priv->ctx,
-				    (desc / tmpl.txq.elts_comp_cd_init) - 1,
+				    (((desc / MLX5_TX_COMP_THRESH) - 1) ?
+				     ((desc / MLX5_TX_COMP_THRESH) - 1) : 1),
 				    NULL, NULL, 0, &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
@@ -438,6 +434,13 @@ mlx5_tx_queue_setup(struct rte_eth_dev *dev, uint16_t idx, uint16_t desc,
 		return -E_RTE_SECONDARY;
 
 	priv_lock(priv);
+	if (desc <= MLX5_TX_COMP_THRESH) {
+		WARN("%p: number of descriptors requested for TX queue %u"
+		     " must be higher than MLX5_TX_COMP_THRESH, using"
+		     " %u instead of %u",
+		     (void *)dev, idx, MLX5_TX_COMP_THRESH + 1, desc);
+		desc = MLX5_TX_COMP_THRESH + 1;
+	}
 	if (!rte_is_power_of_2(desc)) {
 		desc = 1 << log2above(desc);
 		WARN("%p: increased number of descriptors in TX queue %u"

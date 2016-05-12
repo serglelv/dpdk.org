@@ -154,9 +154,6 @@ check_cqe64(volatile struct mlx5_cqe64 *cqe,
  * Manage TX completions.
  *
  * When sending a burst, mlx5_tx_burst() posts several WRs.
- * To improve performance, a completion event is only required once every
- * MLX5_PMD_TX_PER_COMP_REQ sends. Doing so discards completion information
- * for other WRs, but this information would not be used anyway.
  *
  * @param txq
  *   Pointer to TX queue structure.
@@ -170,14 +167,16 @@ txq_complete(struct txq *txq)
 	uint16_t elts_free = txq->elts_tail;
 	uint16_t elts_tail;
 	uint16_t cq_ci = txq->cq_ci;
-	unsigned int wqe_ci = (unsigned int)-1;
+	volatile struct mlx5_cqe64 *cqe = NULL;
+	volatile union mlx5_wqe *wqe;
 
 	do {
-		unsigned int idx = cq_ci & cqe_cnt;
-		volatile struct mlx5_cqe64 *cqe = &(*txq->cqes)[idx];
+		volatile struct mlx5_cqe64 *tmp;
 
-		if (check_cqe64(cqe, cqe_n, cq_ci) == 1)
+		tmp = &(*txq->cqes)[cq_ci & cqe_cnt];
+		if (check_cqe64(tmp, cqe_n, cq_ci))
 			break;
+		cqe = tmp;
 #ifndef NDEBUG
 		if (MLX5_CQE_FORMAT(cqe->op_own) == MLX5_COMPRESSED) {
 			if (!check_cqe64_seen(cqe))
@@ -191,14 +190,15 @@ txq_complete(struct txq *txq)
 			return;
 		}
 #endif /* NDEBUG */
-		wqe_ci = ntohs(cqe->wqe_counter);
 		++cq_ci;
 	} while (1);
-	if (unlikely(wqe_ci == (unsigned int)-1))
+	if (unlikely(cqe == NULL))
 		return;
+	wqe = &(*txq->wqes)[htons(cqe->wqe_counter) & (txq->wqe_n - 1)];
+	elts_tail = wqe->wqe.ctrl.data[3];
+	assert(elts_tail < txq->wqe_n);
 	/* Free buffers. */
-	elts_tail = (wqe_ci + 1) & (elts_n - 1);
-	do {
+	while (elts_free != elts_tail) {
 		struct rte_mbuf *elt = (*txq->elts)[elts_free];
 		unsigned int elts_free_next =
 			(elts_free + 1) & (elts_n - 1);
@@ -214,7 +214,7 @@ txq_complete(struct txq *txq)
 		/* Only one segment needs to be freed. */
 		rte_pktmbuf_free_seg(elt);
 		elts_free = elts_free_next;
-	} while (elts_free != elts_tail);
+	}
 	txq->cq_ci = cq_ci;
 	txq->elts_tail = elts_tail;
 	/* Update the consumer index. */
@@ -435,6 +435,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	const unsigned int elts_n = txq->elts_n;
 	unsigned int i;
 	unsigned int max;
+	unsigned int comp;
 	volatile union mlx5_wqe *wqe;
 	struct rte_mbuf *buf;
 
@@ -484,12 +485,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 					    buf->vlan_tci);
 		else
 			mlx5_wqe_write(txq, wqe, addr, length, lkey);
-		/* Request completion if needed. */
-		if (unlikely(--txq->elts_comp == 0)) {
-			wqe->wqe.ctrl.data[2] = htonl(8);
-			txq->elts_comp = txq->elts_comp_cd_init;
-		} else
-			wqe->wqe.ctrl.data[2] = 0;
+		wqe->wqe.ctrl.data[2] = 0;
 		/* Should we enable HW CKSUM offload */
 		if (buf->ol_flags &
 		    (PKT_TX_IP_CKSUM | PKT_TX_TCP_CKSUM | PKT_TX_UDP_CKSUM)) {
@@ -513,6 +509,15 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	/* Take a shortcut if nothing must be sent. */
 	if (unlikely(i == 0))
 		return 0;
+	/* Check whether completion threshold has been reached. */
+	comp = txq->elts_head - txq->elts_tail;
+	comp -= MLX5_TX_COMP_THRESH * (comp / MLX5_TX_COMP_THRESH);
+	if ((comp + i) >= MLX5_TX_COMP_THRESH) {
+		/* Request completion on last WQE. */
+		wqe->wqe.ctrl.data[2] = htonl(8);
+		/* Save elts_head in unused "immediate" field of WQE. */
+		wqe->wqe.ctrl.data[3] = elts_head;
+	}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
