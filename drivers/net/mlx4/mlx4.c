@@ -197,7 +197,6 @@ struct rxq {
 	unsigned int sp:1; /* Use scattered RX elements. */
 	unsigned int csum:1; /* Enable checksum offloading. */
 	unsigned int csum_l2tun:1; /* Same for L2 tunnels. */
-	uint32_t mb_len; /* Length of a mp-issued mbuf. */
 	struct mlx4_rxq_stats stats; /* RX queue counters. */
 	unsigned int socket; /* CPU socket ID for allocations. */
 	struct ibv_exp_res_domain *rd; /* Resource Domain. */
@@ -3112,7 +3111,6 @@ mlx4_rx_burst_sp(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			rep->ol_flags = -1;
 #endif
 			assert(rep->buf_len == seg->buf_len);
-			assert(rep->buf_len == rxq->mb_len);
 			/* Reconfigure sge to use rep instead of seg. */
 			assert(sge->lkey == rxq->mr->lkey);
 			sge->addr = ((uintptr_t)rep->buf_addr + seg_headroom);
@@ -3533,6 +3531,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	unsigned int i, k;
 	struct ibv_exp_qp_attr mod;
 	struct ibv_recv_wr *bad_wr;
+	unsigned int mb_len = rte_pktmbuf_data_room_size(rxq->mp);
 	int err;
 	int parent = (rxq == &priv->rxq_parent);
 
@@ -3555,9 +3554,10 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		rxq->csum_l2tun = tmpl.csum_l2tun;
 	}
 	/* Enable scattered packets support for this queue if necessary. */
+	assert(mb_len >= RTE_PKTMBUF_HEADROOM);
 	if ((dev->data->dev_conf.rxmode.jumbo_frame) &&
 	    (dev->data->dev_conf.rxmode.max_rx_pkt_len >
-	     (tmpl.mb_len - RTE_PKTMBUF_HEADROOM))) {
+	     (mb_len - RTE_PKTMBUF_HEADROOM))) {
 		tmpl.sp = 1;
 		desc_n /= MLX4_PMD_SGE_WR_N;
 	} else
@@ -3748,7 +3748,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	} attr;
 	enum ibv_exp_query_intf_status status;
 	struct ibv_recv_wr *bad_wr;
-	struct rte_mbuf *buf;
+	unsigned int mb_len = rte_pktmbuf_data_room_size(mp);
 	int ret = 0;
 	int parent = (rxq == &priv->rxq_parent);
 
@@ -3769,26 +3769,16 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		      " multiple of %d)", (void *)dev, MLX4_PMD_SGE_WR_N);
 		return EINVAL;
 	}
-	/* Get mbuf length. */
-	buf = rte_pktmbuf_alloc(mp);
-	if (buf == NULL) {
-		ERROR("%p: unable to allocate mbuf", (void *)dev);
-		return ENOMEM;
-	}
-	tmpl.mb_len = buf->buf_len;
-	assert((rte_pktmbuf_headroom(buf) +
-		rte_pktmbuf_tailroom(buf)) == tmpl.mb_len);
-	assert(rte_pktmbuf_headroom(buf) == RTE_PKTMBUF_HEADROOM);
-	rte_pktmbuf_free(buf);
 	/* Toggle RX checksum offload if hardware supports it. */
 	if (priv->hw_csum)
 		tmpl.csum = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
 	if (priv->hw_csum_l2tun)
 		tmpl.csum_l2tun = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
 	/* Enable scattered packets support for this queue if necessary. */
+	assert(mb_len >= RTE_PKTMBUF_HEADROOM);
 	if ((dev->data->dev_conf.rxmode.jumbo_frame) &&
 	    (dev->data->dev_conf.rxmode.max_rx_pkt_len >
-	     (tmpl.mb_len - RTE_PKTMBUF_HEADROOM))) {
+	     (mb_len - RTE_PKTMBUF_HEADROOM))) {
 		tmpl.sp = 1;
 		desc /= MLX4_PMD_SGE_WR_N;
 	}
@@ -4825,6 +4815,7 @@ mlx4_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 	/* Reconfigure each RX queue. */
 	for (i = 0; (i != priv->rxqs_n); ++i) {
 		struct rxq *rxq = (*priv->rxqs)[i];
+		unsigned int mb_len;
 		unsigned int max_frame_len;
 		int sp;
 
@@ -4834,7 +4825,9 @@ mlx4_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 		 * toggle scattered support (sp) if necessary. */
 		max_frame_len = (priv->mtu + ETHER_HDR_LEN +
 				 (ETHER_MAX_VLAN_FRAME_LEN - ETHER_MAX_LEN));
-		sp = (max_frame_len > (rxq->mb_len - RTE_PKTMBUF_HEADROOM));
+		mb_len = rte_pktmbuf_data_room_size(rxq->mp);
+		assert(mb_len >= RTE_PKTMBUF_HEADROOM);
+		sp = (max_frame_len > (mb_len - RTE_PKTMBUF_HEADROOM));
 		/* Provide new values to rxq_setup(). */
 		dev->data->dev_conf.rxmode.jumbo_frame = sp;
 		dev->data->dev_conf.rxmode.max_rx_pkt_len = max_frame_len;
