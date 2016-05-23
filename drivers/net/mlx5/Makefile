@@ -45,7 +45,6 @@ SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxq.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_txq.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxtx.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxtx_mr.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_trigger.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_ethdev.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_mac.c
@@ -53,7 +52,6 @@ SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rxmode.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_vlan.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_stats.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_rss.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += mlx5_fdir.c
 
 # Dependencies.
 DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_ether
@@ -68,7 +66,6 @@ CFLAGS += -g
 CFLAGS += -I.
 CFLAGS += -D_XOPEN_SOURCE=600
 CFLAGS += $(WERROR_FLAGS)
-CFLAGS += -Wno-strict-prototypes
 LDLIBS += -libverbs
 
 # A few warnings cannot be avoided in external headers.
@@ -88,6 +85,14 @@ ifeq ($(CONFIG_RTE_LIBRTE_MLX5_DEBUG),y)
 CFLAGS += -pedantic -UNDEBUG -DPEDANTIC
 else
 CFLAGS += -DNDEBUG -UPEDANTIC
+endif
+
+ifdef CONFIG_RTE_LIBRTE_MLX5_SGE_WR_N
+CFLAGS += -DMLX5_PMD_SGE_WR_N=$(CONFIG_RTE_LIBRTE_MLX5_SGE_WR_N)
+endif
+
+ifdef CONFIG_RTE_LIBRTE_MLX5_MAX_INLINE
+CFLAGS += -DMLX5_PMD_MAX_INLINE=$(CONFIG_RTE_LIBRTE_MLX5_MAX_INLINE)
 endif
 
 ifdef CONFIG_RTE_LIBRTE_MLX5_TX_MP_CACHE
@@ -120,18 +125,8 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		infiniband/verbs.h \
 		enum IBV_EXP_QP_BURST_CREATE_ENABLE_MULTI_PACKET_SEND_WR \
 		$(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
-		HAVE_EXP_CQ_RX_TCP_PACKET \
-		infiniband/verbs.h \
-		enum IBV_EXP_CQ_RX_TCP_PACKET \
-		$(AUTOCONF_OUTPUT)
-	$Q sh -- '$<' '$@' \
-		HAVE_EXP_CREATE_WQ_FLAG_RX_END_PADDING \
-		infiniband/verbs.h \
-		enum IBV_EXP_CREATE_WQ_FLAG_RX_END_PADDING \
-		$(AUTOCONF_OUTPUT)
 
-$(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD):.c=.o): mlx5_autoconf.h
+mlx5.o: mlx5_autoconf.h
 
 clean_mlx5: FORCE
 	$Q rm -f -- mlx5_autoconf.h

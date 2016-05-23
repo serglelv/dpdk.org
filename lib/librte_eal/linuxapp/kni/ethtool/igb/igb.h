@@ -544,7 +544,7 @@ struct igb_adapter {
 	u32 bd_number;
 	u32 wol;
 	u32 en_mng_pt;
-	u32 link_speed;
+	u16 link_speed;
 	u16 link_duplex;
 	u8 port_num;
 

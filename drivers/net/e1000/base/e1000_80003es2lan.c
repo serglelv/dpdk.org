@@ -52,7 +52,7 @@ STATIC s32  e1000_write_nvm_80003es2lan(struct e1000_hw *hw, u16 offset,
 STATIC s32  e1000_get_cfg_done_80003es2lan(struct e1000_hw *hw);
 STATIC s32  e1000_phy_force_speed_duplex_80003es2lan(struct e1000_hw *hw);
 STATIC s32  e1000_get_cable_length_80003es2lan(struct e1000_hw *hw);
-STATIC s32  e1000_get_link_up_info_80003es2lan(struct e1000_hw *hw, u32 *speed,
+STATIC s32  e1000_get_link_up_info_80003es2lan(struct e1000_hw *hw, u16 *speed,
 					       u16 *duplex);
 STATIC s32  e1000_reset_hw_80003es2lan(struct e1000_hw *hw);
 STATIC s32  e1000_init_hw_80003es2lan(struct e1000_hw *hw);
@@ -789,7 +789,7 @@ STATIC s32 e1000_get_cable_length_80003es2lan(struct e1000_hw *hw)
  *
  *  Retrieve the current speed and duplex configuration.
  **/
-STATIC s32 e1000_get_link_up_info_80003es2lan(struct e1000_hw *hw, u32 *speed,
+STATIC s32 e1000_get_link_up_info_80003es2lan(struct e1000_hw *hw, u16 *speed,
 					      u16 *duplex)
 {
 	s32 ret_val;
@@ -1247,7 +1247,7 @@ STATIC s32 e1000_setup_copper_link_80003es2lan(struct e1000_hw *hw)
 STATIC s32 e1000_cfg_on_link_up_80003es2lan(struct e1000_hw *hw)
 {
 	s32 ret_val = E1000_SUCCESS;
-	u32 speed;
+	u16 speed;
 	u16 duplex;
 
 	DEBUGFUNC("e1000_configure_on_link_up");

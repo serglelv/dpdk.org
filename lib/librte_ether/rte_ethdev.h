@@ -245,7 +245,7 @@ struct rte_eth_stats {
  * A structure used to retrieve link-level information of an Ethernet port.
  */
 struct rte_eth_link {
-	uint32_t link_speed;      /**< ETH_LINK_SPEED_[10, 100, 1000, 10000, 40000, 100000] */
+	uint16_t link_speed;      /**< ETH_LINK_SPEED_[10, 100, 1000, 10000] */
 	uint16_t link_duplex;     /**< ETH_LINK_[HALF_DUPLEX, FULL_DUPLEX] */
 	uint8_t  link_status : 1; /**< 1 -> link up, 0 -> link down */
 }__attribute__((aligned(8)));     /**< aligned for atomic64 read/write */
@@ -258,7 +258,6 @@ struct rte_eth_link {
 #define ETH_LINK_SPEED_10G      10000   /**< alias of 10 gigabits/second. */
 #define ETH_LINK_SPEED_20G      20000   /**< 20 gigabits/second. */
 #define ETH_LINK_SPEED_40G      40000   /**< 40 gigabits/second. */
-#define ETH_LINK_SPEED_100G     100000  /**< 100 gigabits/second. */
 
 #define ETH_LINK_AUTONEG_DUPLEX 0       /**< Auto-negotiate duplex. */
 #define ETH_LINK_HALF_DUPLEX    1       /**< Half-duplex connection. */
@@ -521,7 +520,7 @@ struct rte_eth_mirror_conf {
 struct rte_eth_rss_reta_entry64 {
 	uint64_t mask;
 	/**< Mask bits indicate which entries need to be updated/queried. */
-	uint16_t reta[RTE_RETA_GROUP_SIZE];
+	uint8_t reta[RTE_RETA_GROUP_SIZE];
 	/**< Group of 64 redirection table entries. */
 };
 
@@ -761,7 +760,7 @@ struct rte_intr_conf {
  * configuration settings may be needed.
  */
 struct rte_eth_conf {
-	uint32_t link_speed;
+	uint16_t link_speed;
 	/**< ETH_LINK_SPEED_10[0|00|000], or 0 for autonegotation */
 	uint16_t link_duplex;
 	/**< ETH_LINK_[HALF_DUPLEX|FULL_DUPLEX], or 0 for autonegotation */

@@ -94,6 +94,11 @@ rte_mov256(uint8_t *dst, const uint8_t *src)
 	rte_mov128(dst + 128, src + 128);
 }
 
+#define rte_memcpy(dst, src, n)              \
+	({ (__builtin_constant_p(n)) ?       \
+	memcpy((dst), (src), (n)) :          \
+	rte_memcpy_func((dst), (src), (n)); })
+
 static inline void *
 rte_memcpy_func(void *dst, const void *src, size_t n)
 {
@@ -211,14 +216,6 @@ rte_memcpy_func(void *dst, const void *src, size_t n)
 		rte_mov16((uint8_t *)dst - 16 + n,
 			(const uint8_t *)src - 16 + n);
 	return ret;
-}
-
-static inline void *
-rte_memcpy(void *dst, const void *src, size_t n)
-{
-	return __builtin_constant_p(n) ?
-		memcpy((dst), (src), (n)) :
-		rte_memcpy_func((dst), (src), (n));
 }
 
 #ifdef __cplusplus

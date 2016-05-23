@@ -106,7 +106,7 @@ void e1000_null_mac_generic(struct e1000_hw E1000_UNUSEDARG *hw)
  *  @hw: pointer to the HW structure
  **/
 s32 e1000_null_link_info(struct e1000_hw E1000_UNUSEDARG *hw,
-			 u32 E1000_UNUSEDARG *s, u16 E1000_UNUSEDARG *d)
+			 u16 E1000_UNUSEDARG *s, u16 E1000_UNUSEDARG *d)
 {
 	DEBUGFUNC("e1000_null_link_info");
 	UNREFERENCED_3PARAMETER(hw, s, d);
@@ -1348,8 +1348,7 @@ s32 e1000_config_fc_after_link_up_generic(struct e1000_hw *hw)
 	s32 ret_val = E1000_SUCCESS;
 	u32 pcs_status_reg, pcs_adv_reg, pcs_lp_ability_reg, pcs_ctrl_reg;
 	u16 mii_status_reg, mii_nway_adv_reg, mii_nway_lp_ability_reg;
-	u32 speed;
-	u16 duplex;
+	u16 speed, duplex;
 
 	DEBUGFUNC("e1000_config_fc_after_link_up_generic");
 
@@ -1651,7 +1650,7 @@ s32 e1000_config_fc_after_link_up_generic(struct e1000_hw *hw)
  *  Read the status register for the current speed/duplex and store the current
  *  speed and duplex for copper connections.
  **/
-s32 e1000_get_speed_and_duplex_copper_generic(struct e1000_hw *hw, u32 *speed,
+s32 e1000_get_speed_and_duplex_copper_generic(struct e1000_hw *hw, u16 *speed,
 					      u16 *duplex)
 {
 	u32 status;
@@ -1691,7 +1690,7 @@ s32 e1000_get_speed_and_duplex_copper_generic(struct e1000_hw *hw, u32 *speed,
  *  for fiber/serdes links.
  **/
 s32 e1000_get_speed_and_duplex_fiber_serdes_generic(struct e1000_hw E1000_UNUSEDARG *hw,
-						    u32 *speed, u16 *duplex)
+						    u16 *speed, u16 *duplex)
 {
 	DEBUGFUNC("e1000_get_speed_and_duplex_fiber_serdes_generic");
 	UNREFERENCED_1PARAMETER(hw);

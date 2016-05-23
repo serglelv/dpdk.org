@@ -31,7 +31,7 @@
 void e1000_init_mac_ops_generic(struct e1000_hw *hw);
 void e1000_null_mac_generic(struct e1000_hw *hw);
 s32  e1000_null_ops_generic(struct e1000_hw *hw);
-s32  e1000_null_link_info(struct e1000_hw *hw, u32 *s, u16 *d);
+s32  e1000_null_link_info(struct e1000_hw *hw, u16 *s, u16 *d);
 bool e1000_null_mng_mode(struct e1000_hw *hw);
 void e1000_null_update_mc(struct e1000_hw *hw, u8 *h, u32 a);
 void e1000_null_write_vfta(struct e1000_hw *hw, u32 a, u32 b);
@@ -48,10 +48,10 @@ s32  e1000_get_auto_rd_done_generic(struct e1000_hw *hw);
 s32  e1000_get_bus_info_pcie_generic(struct e1000_hw *hw);
 void e1000_set_lan_id_single_port(struct e1000_hw *hw);
 s32  e1000_get_hw_semaphore_generic(struct e1000_hw *hw);
-s32  e1000_get_speed_and_duplex_copper_generic(struct e1000_hw *hw, u32 *speed,
+s32  e1000_get_speed_and_duplex_copper_generic(struct e1000_hw *hw, u16 *speed,
 					       u16 *duplex);
 s32  e1000_get_speed_and_duplex_fiber_serdes_generic(struct e1000_hw *hw,
-						     u32 *speed, u16 *duplex);
+						     u16 *speed, u16 *duplex);
 s32  e1000_id_led_init_generic(struct e1000_hw *hw);
 s32  e1000_led_on_generic(struct e1000_hw *hw);
 s32  e1000_led_off_generic(struct e1000_hw *hw);

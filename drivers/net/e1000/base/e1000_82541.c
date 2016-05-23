@@ -47,7 +47,7 @@ STATIC s32  e1000_init_nvm_params_82541(struct e1000_hw *hw);
 STATIC s32  e1000_init_mac_params_82541(struct e1000_hw *hw);
 STATIC s32  e1000_reset_hw_82541(struct e1000_hw *hw);
 STATIC s32  e1000_init_hw_82541(struct e1000_hw *hw);
-STATIC s32  e1000_get_link_up_info_82541(struct e1000_hw *hw, u32 *speed,
+STATIC s32  e1000_get_link_up_info_82541(struct e1000_hw *hw, u16 *speed,
 					 u16 *duplex);
 STATIC s32  e1000_phy_hw_reset_82541(struct e1000_hw *hw);
 STATIC s32  e1000_setup_copper_link_82541(struct e1000_hw *hw);
@@ -437,7 +437,7 @@ out:
  *
  * Retrieve the current speed and duplex configuration.
  **/
-STATIC s32 e1000_get_link_up_info_82541(struct e1000_hw *hw, u32 *speed,
+STATIC s32 e1000_get_link_up_info_82541(struct e1000_hw *hw, u16 *speed,
 					u16 *duplex)
 {
 	struct e1000_phy_info *phy = &hw->phy;
@@ -667,8 +667,8 @@ STATIC s32 e1000_config_dsp_after_link_change_82541(struct e1000_hw *hw,
 	struct e1000_phy_info *phy = &hw->phy;
 	struct e1000_dev_spec_82541 *dev_spec = &hw->dev_spec._82541;
 	s32 ret_val;
-	u32 idle_errs = 0, speed;
-	u16 phy_data, phy_saved_data, duplex, i;
+	u32 idle_errs = 0;
+	u16 phy_data, phy_saved_data, speed, duplex, i;
 	u16 ffe_idle_err_timeout = FFE_IDLE_ERR_COUNT_TIMEOUT_20;
 	u16 dsp_reg_array[IGP01E1000_PHY_CHANNEL_NUM] = {
 						IGP01E1000_PHY_AGC_PARAM_A,

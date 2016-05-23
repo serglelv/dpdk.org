@@ -55,7 +55,7 @@
 void
 mlx5_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 {
-	struct priv *priv = mlx5_get_priv(dev);
+	struct priv *priv = dev->data->dev_private;
 	struct rte_eth_stats tmp = {0};
 	unsigned int i;
 	unsigned int idx;
@@ -63,46 +63,44 @@ mlx5_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 	priv_lock(priv);
 	/* Add software counters. */
 	for (i = 0; (i != priv->rxqs_n); ++i) {
-		struct frxq *frxq = (*priv->rxqs)[i];
-		struct rxq *rxq = container_of(frxq, struct rxq, frxq);
+		struct rxq *rxq = (*priv->rxqs)[i];
 
 		if (rxq == NULL)
 			continue;
 		idx = rxq->stats.idx;
 		if (idx < RTE_ETHDEV_QUEUE_STAT_CNTRS) {
 #ifdef MLX5_PMD_SOFT_COUNTERS
-			tmp.q_ipackets[idx] += rxq->frxq.stats.ipackets;
-			tmp.q_ibytes[idx] += rxq->frxq.stats.ibytes;
+			tmp.q_ipackets[idx] += rxq->stats.ipackets;
+			tmp.q_ibytes[idx] += rxq->stats.ibytes;
 #endif
 			tmp.q_errors[idx] += (rxq->stats.idropped +
 					      rxq->stats.rx_nombuf);
 		}
 #ifdef MLX5_PMD_SOFT_COUNTERS
-		tmp.ipackets += rxq->frxq.stats.ipackets;
-		tmp.ibytes += rxq->frxq.stats.ibytes;
+		tmp.ipackets += rxq->stats.ipackets;
+		tmp.ibytes += rxq->stats.ibytes;
 #endif
 		tmp.ierrors += rxq->stats.idropped;
 		tmp.rx_nombuf += rxq->stats.rx_nombuf;
 	}
 	for (i = 0; (i != priv->txqs_n); ++i) {
-		struct ftxq *ftxq = (*priv->txqs)[i];
-		struct txq *txq = container_of(ftxq, struct txq, ftxq);
+		struct txq *txq = (*priv->txqs)[i];
 
 		if (txq == NULL)
 			continue;
-		idx = txq->ftxq.stats.idx;
+		idx = txq->stats.idx;
 		if (idx < RTE_ETHDEV_QUEUE_STAT_CNTRS) {
 #ifdef MLX5_PMD_SOFT_COUNTERS
-			tmp.q_opackets[idx] += txq->ftxq.stats.opackets;
-			tmp.q_obytes[idx] += txq->ftxq.stats.obytes;
+			tmp.q_opackets[idx] += txq->stats.opackets;
+			tmp.q_obytes[idx] += txq->stats.obytes;
 #endif
-			tmp.q_errors[idx] += txq->ftxq.stats.odropped;
+			tmp.q_errors[idx] += txq->stats.odropped;
 		}
 #ifdef MLX5_PMD_SOFT_COUNTERS
-		tmp.opackets += txq->ftxq.stats.opackets;
-		tmp.obytes += txq->ftxq.stats.obytes;
+		tmp.opackets += txq->stats.opackets;
+		tmp.obytes += txq->stats.obytes;
 #endif
-		tmp.oerrors += txq->ftxq.stats.odropped;
+		tmp.oerrors += txq->stats.odropped;
 	}
 #ifndef MLX5_PMD_SOFT_COUNTERS
 	/* FIXME: retrieve and add hardware counters. */

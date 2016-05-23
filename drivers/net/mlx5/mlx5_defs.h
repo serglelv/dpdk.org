@@ -34,8 +34,6 @@
 #ifndef RTE_PMD_MLX5_DEFS_H_
 #define RTE_PMD_MLX5_DEFS_H_
 
-#include "mlx5_autoconf.h"
-
 /* Reported driver name. */
 #define MLX5_DRIVER_NAME "librte_pmd_mlx5"
 
@@ -45,17 +43,21 @@
 /* Maximum number of simultaneous VLAN filters. */
 #define MLX5_MAX_VLAN_IDS 128
 
-/* Maximum number of special flows. */
-#define MLX5_MAX_SPECIAL_FLOWS 4
-
 /* Request send completion once in every 64 sends, might be less. */
 #define MLX5_PMD_TX_PER_COMP_REQ 64
 
 /* RSS Indirection table size. */
-#define RSS_INDIRECTION_TABLE_SIZE 256
+#define RSS_INDIRECTION_TABLE_SIZE 128
 
-/* size of CRC to be stripped */
-#define CRC_SIZE 4
+/* Maximum number of Scatter/Gather Elements per Work Request. */
+#ifndef MLX5_PMD_SGE_WR_N
+#define MLX5_PMD_SGE_WR_N 4
+#endif
+
+/* Maximum size for inline data. */
+#ifndef MLX5_PMD_MAX_INLINE
+#define MLX5_PMD_MAX_INLINE 0
+#endif
 
 /*
  * Maximum number of cached Memory Pools (MPs) per TX queue. Each RTE MP

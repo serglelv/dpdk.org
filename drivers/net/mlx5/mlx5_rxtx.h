@@ -43,7 +43,6 @@
 #pragma GCC diagnostic ignored "-pedantic"
 #endif
 #include <infiniband/verbs.h>
-#include <infiniband/mlx5_hw.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -62,8 +61,6 @@
 #include "mlx5.h"
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
-
-#define MLX5_MWQE64_INL_DATA 28
 
 struct mlx5_rxq_stats {
 	unsigned int idx; /**< Mapping index. */
@@ -84,56 +81,43 @@ struct mlx5_txq_stats {
 	uint64_t odropped; /**< Total of packets not sent when TX ring full. */
 };
 
-/* Flow director queue structure. */
-struct fdir_queue {
-	struct ibv_qp *qp; /* Associated RX QP. */
-	struct ibv_exp_rwq_ind_table *ind_table; /* Indirection table. */
+/* RX element (scattered packets). */
+struct rxq_elt_sp {
+	struct ibv_sge sges[MLX5_PMD_SGE_WR_N]; /* Scatter/Gather Elements. */
+	struct rte_mbuf *bufs[MLX5_PMD_SGE_WR_N]; /* SGEs buffers. */
+};
+
+/* RX element. */
+struct rxq_elt {
+	struct ibv_sge sge; /* Scatter/Gather Element. */
+	struct rte_mbuf *buf; /* SGE buffer. */
 };
 
 struct priv;
 
-struct rxq_zip {
-	uint16_t ai; /* Array index. */
-	uint16_t ca; /* Current array index. */
-	uint16_t na; /* Next array index. */
-	uint16_t cq_ci; /* The next CQE. */
-	uint32_t cqe_cnt;
-};
-
-/* RX queue descriptor. */
-struct frxq {
-	uint16_t idx;
-	uint16_t rq_ci;
-	uint16_t cq_ci;
-	uint16_t elts_n;
-	uint16_t cqe_cnt;
-	uint16_t port_id;
-	struct rxq_zip zip; /* Compressed context. */
-	volatile struct mlx5_wqe_data_seg (*wqes)[];
-	volatile struct mlx5_cqe64 (*cqes)[];
-	volatile uint32_t *rq_db;
-	volatile uint32_t *cq_db;
-	struct rte_mbuf *(*elts)[];
-	struct rte_mempool *mp;
-	unsigned int csum:1; /* Enable checksum offloading. */
-	unsigned int vlan_strip:1; /* Enable VLAN stripping. */
-	unsigned int crc_present:1; /* CRC must be subtracted. */
-	struct mlx5_rxq_stats stats;
-} __attribute__((aligned(64)));
-
 /* RX queue descriptor. */
 struct rxq {
 	struct priv *priv; /* Back pointer to private data. */
+	struct rte_mempool *mp; /* Memory Pool for allocations. */
+	struct ibv_mr *mr; /* Memory Region (for mp). */
 	struct ibv_cq *cq; /* Completion Queue. */
 	struct ibv_exp_wq *wq; /* Work Queue. */
-	unsigned int socket; /* CPU socket ID for allocations. */
-	struct mlx5_rxq_stats stats; /* RX queue counters. */
-	struct ibv_exp_res_domain *rd; /* Resource Domain. */
-	struct fdir_queue fdir_queue; /* Flow director queue. */
-	struct ibv_mr *mr; /* Memory Region (for mp). */
 	struct ibv_exp_wq_family *if_wq; /* WQ burst interface. */
 	struct ibv_exp_cq_family *if_cq; /* CQ interface. */
-	struct frxq frxq;
+	unsigned int port_id; /* Port ID for incoming packets. */
+	unsigned int elts_n; /* (*elts)[] length. */
+	unsigned int elts_head; /* Current index in (*elts)[]. */
+	union {
+		struct rxq_elt_sp (*sp)[]; /* Scattered RX elements. */
+		struct rxq_elt (*no_sp)[]; /* RX elements. */
+	} elts;
+	unsigned int sp:1; /* Use scattered RX elements. */
+	unsigned int csum:1; /* Enable checksum offloading. */
+	unsigned int csum_l2tun:1; /* Same for L2 tunnels. */
+	uint32_t mb_len; /* Length of a mp-issued mbuf. */
+	struct mlx5_rxq_stats stats; /* RX queue counters. */
+	unsigned int socket; /* CPU socket ID for allocations. */
+	struct ibv_exp_res_domain *rd; /* Resource Domain. */
 };
 
 /* Hash RX queue types. */
@@ -192,41 +176,11 @@ struct ind_table_init {
 	unsigned int hash_types_n;
 };
 
-/* Initialization data for special flows. */
-struct special_flow_init {
-	uint8_t dst_mac_val[6];
-	uint8_t dst_mac_mask[6];
-	unsigned int hash_types;
-	unsigned int per_vlan:1;
-};
-
 enum hash_rxq_flow_type {
+	HASH_RXQ_FLOW_TYPE_MAC,
 	HASH_RXQ_FLOW_TYPE_PROMISC,
 	HASH_RXQ_FLOW_TYPE_ALLMULTI,
-	HASH_RXQ_FLOW_TYPE_BROADCAST,
-	HASH_RXQ_FLOW_TYPE_IPV6MULTI,
-	HASH_RXQ_FLOW_TYPE_MAC,
 };
-
-#ifndef NDEBUG
-static inline const char *
-hash_rxq_flow_type_str(enum hash_rxq_flow_type flow_type)
-{
-	switch (flow_type) {
-	case HASH_RXQ_FLOW_TYPE_PROMISC:
-		return "promiscuous";
-	case HASH_RXQ_FLOW_TYPE_ALLMULTI:
-		return "allmulticast";
-	case HASH_RXQ_FLOW_TYPE_BROADCAST:
-		return "broadcast";
-	case HASH_RXQ_FLOW_TYPE_IPV6MULTI:
-		return "IPv6 multicast";
-	case HASH_RXQ_FLOW_TYPE_MAC:
-		return "MAC";
-	}
-	return NULL;
-}
-#endif /* NDEBUG */
 
 struct hash_rxq {
 	struct priv *priv; /* Back pointer to private data. */
@@ -234,119 +188,50 @@ struct hash_rxq {
 	enum hash_rxq_type type; /* Hash RX queue type. */
 	/* MAC flow steering rules, one per VLAN ID. */
 	struct ibv_exp_flow *mac_flow[MLX5_MAX_MAC_ADDRESSES][MLX5_MAX_VLAN_IDS];
-	struct ibv_exp_flow *special_flow[MLX5_MAX_SPECIAL_FLOWS][MLX5_MAX_VLAN_IDS];
+	struct ibv_exp_flow *promisc_flow; /* Promiscuous flow. */
+	struct ibv_exp_flow *allmulti_flow; /* Multicast flow. */
 };
 
-struct mlx5_wqe64 {
-	union {
-		struct mlx5_wqe_ctrl_seg ctrl;
-		uint32_t data[4];
-	} ctrl;
-	struct mlx5_wqe_eth_seg eseg;
-	struct mlx5_wqe_data_seg dseg;
+/* TX element. */
+struct txq_elt {
+	struct rte_mbuf *buf;
 };
 
-#define MLX5_MPW_DSEG_MAX 5
+/* Linear buffer type. It is used when transmitting buffers with too many
+ * segments that do not fit the hardware queue (see max_send_sge).
+ * Extra segments are copied (linearized) in such buffers, replacing the
+ * last SGE during TX.
+ * The size is arbitrary but large enough to hold a jumbo frame with
+ * 8 segments considering mbuf.buf_len is about 2048 bytes. */
+typedef uint8_t linear_t[16384];
 
-struct mlx5_mpw_wqe_eseg {
-	uint32_t rsvd0;
-	uint8_t	cs_flags;
-	uint8_t	rsvd1;
-	uint16_t mss;
-	uint32_t rsvd2;
-	uint16_t inline_hdr_sz;
-};
-
-struct mlx5_mpw_wqe {
-	union {
-		struct mlx5_wqe_ctrl_seg ctrl;
-		uint32_t data[4];
-	} ctrl;
-	struct mlx5_mpw_wqe_eseg eseg;
-	struct mlx5_wqe_data_seg dseg[2];
-} __attribute__((aligned(64)));
-
-struct mlx5_mpw_inl_wqe {
-	union {
-		struct mlx5_wqe_ctrl_seg ctrl;
-		uint32_t data[4];
-	} ctrl;
-	struct mlx5_mpw_wqe_eseg eseg;
-	uint32_t byte_cnt;
-	uint8_t data[MLX5_MWQE64_INL_DATA];
-} __attribute__((aligned(64)));
-
-enum mlx5_mpw_state {
-	MLX5_MPW_STATE_OPENED,
-	MLX5_MPW_INL_STATE_OPENED,
-	MLX5_MPW_STATE_CLOSED,
-};
-
-struct mlx5_mpw {
-	enum mlx5_mpw_state state;
-	unsigned int pkts_n;
-	unsigned int len;
-	unsigned int total_len;
-	union {
-		volatile struct mlx5_mpw_wqe *noinl;
-		volatile struct mlx5_mpw_inl_wqe *inl;
-	} wqe;
-	union {
-		volatile struct mlx5_wqe_data_seg *dseg[MLX5_MPW_DSEG_MAX];
-		volatile uint8_t *raw;
-	} data;
-	unsigned int remaining_n;
-};
-
-#define MLX5_WQE64_INL_DATA 12
-#define MLX5_WQE64_INL_DATA_OFFSET 52
-
-struct mlx5_wqe64_inl {
-	union {
-		struct mlx5_wqe64 wqe;
-		char data[64];
-	} wqe;
-};
-
-struct ftxq {
-	uint16_t elts_head; /* Current index in (*elts)[]. */
-	uint16_t elts_tail; /* First element awaiting completion. */
-	uint16_t elts_comp_cd_init; /* Initial value for countdown. */
-	uint16_t elts_comp; /* number of completion per ring. */
-	uint16_t elts_n;
-	uint16_t cq_ci;
-	uint16_t cqe_cnt;
-	uint16_t wqe_ci;
-	uint16_t wqe_cnt;
-	uint16_t bf_offset;
-	uint16_t bf_buf_size;
-	uint16_t max_inline; /* Maximum size to inline in a WQE. */
-	volatile struct mlx5_cqe64 (*cqes)[];
-	volatile struct mlx5_wqe64 (*wqes)[];
-	volatile uint32_t *qp_db;
-	volatile uint32_t *cq_db;
-	volatile void *bf_reg;
+/* TX queue descriptor. */
+struct txq {
+	struct priv *priv; /* Back pointer to private data. */
 	struct {
 		const struct rte_mempool *mp; /* Cached Memory Pool. */
 		struct ibv_mr *mr; /* Memory Region (for mp). */
 		uint32_t lkey; /* mr->lkey */
 	} mp2mr[MLX5_PMD_TX_MP_CACHE]; /* MP to MR translation table. */
-	struct rte_mbuf *(*elts)[];
-	struct mlx5_txq_stats stats; /* TX queue counters. */
-	uint32_t qp_num_8s; /* QP number shifted by 8. */
-} __attribute__((aligned(64)));
-
-/* TX queue descriptor. */
-struct txq {
-	struct priv *priv; /* Back pointer to private data. */
 	struct ibv_cq *cq; /* Completion Queue. */
 	struct ibv_qp *qp; /* Queue Pair. */
-	/* Elements used only for init part are here. */
 	struct ibv_exp_qp_burst_family *if_qp; /* QP burst interface. */
 	struct ibv_exp_cq_family *if_cq; /* CQ interface. */
-	struct ibv_exp_res_domain *rd; /* Resource Domain. */
+#if MLX5_PMD_MAX_INLINE > 0
+	uint32_t max_inline; /* Max inline send size <= MLX5_PMD_MAX_INLINE. */
+#endif
+	unsigned int elts_n; /* (*elts)[] length. */
+	struct txq_elt (*elts)[]; /* TX elements. */
+	unsigned int elts_head; /* Current index in (*elts)[]. */
+	unsigned int elts_tail; /* First element awaiting completion. */
+	unsigned int elts_comp; /* Number of completion requests. */
+	unsigned int elts_comp_cd; /* Countdown for next completion request. */
+	unsigned int elts_comp_cd_init; /* Initial value for countdown. */
+	struct mlx5_txq_stats stats; /* TX queue counters. */
+	linear_t (*elts_linear)[]; /* Linearized buffers. */
+	struct ibv_mr *mr_linear; /* Memory Region for linearized buffers. */
 	unsigned int socket; /* CPU socket ID for allocations. */
-	struct ftxq ftxq;
+	struct ibv_exp_res_domain *rd; /* Resource Domain. */
 };
 
 /* mlx5_rxq.c */
@@ -357,12 +242,11 @@ extern const unsigned int hash_rxq_init_n;
 extern uint8_t rss_hash_default_key[];
 extern const size_t rss_hash_default_key_len;
 
-size_t priv_flow_attr(struct priv *, struct ibv_exp_flow_attr *,
-		      size_t, enum hash_rxq_type);
+size_t hash_rxq_flow_attr(const struct hash_rxq *, struct ibv_exp_flow_attr *,
+			  size_t);
 int priv_create_hash_rxqs(struct priv *);
 void priv_destroy_hash_rxqs(struct priv *);
 int priv_allow_flow_type(struct priv *, enum hash_rxq_flow_type);
-int priv_rehash_flows(struct priv *);
 void rxq_cleanup(struct rxq *);
 int rxq_rehash(struct rte_eth_dev *, struct rxq *);
 int rxq_setup(struct rte_eth_dev *, struct rxq *, uint16_t, unsigned int,
@@ -370,35 +254,21 @@ int rxq_setup(struct rte_eth_dev *, struct rxq *, uint16_t, unsigned int,
 int mlx5_rx_queue_setup(struct rte_eth_dev *, uint16_t, uint16_t, unsigned int,
 			const struct rte_eth_rxconf *, struct rte_mempool *);
 void mlx5_rx_queue_release(void *);
-uint16_t mlx5_rx_burst_secondary_setup(void *dpdk_rxq, struct rte_mbuf **pkts,
-			      uint16_t pkts_n);
-
 
 /* mlx5_txq.c */
 
 void txq_cleanup(struct txq *);
-int txq_setup(struct rte_eth_dev *dev, struct txq *txq, uint16_t desc,
-	  unsigned int socket, const struct rte_eth_txconf *conf);
 int mlx5_tx_queue_setup(struct rte_eth_dev *, uint16_t, uint16_t, unsigned int,
 			const struct rte_eth_txconf *);
 void mlx5_tx_queue_release(void *);
-uint16_t mlx5_tx_burst_secondary_setup(void *dpdk_txq, struct rte_mbuf **pkts,
-			      uint16_t pkts_n);
 
 /* mlx5_rxtx.c */
 
+void txq_mp2mr_iter(const struct rte_mempool *, void *);
 uint16_t mlx5_tx_burst(void *, struct rte_mbuf **, uint16_t);
-uint16_t mlx5_tx_burst_inline(void *, struct rte_mbuf **, uint16_t);
-uint16_t mlx5_tx_burst_mpw(void *, struct rte_mbuf **, uint16_t);
-uint16_t mlx5_tx_burst_mpw_inline(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst_sp(void *, struct rte_mbuf **, uint16_t);
 uint16_t mlx5_rx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t removed_tx_burst(void *, struct rte_mbuf **, uint16_t);
 uint16_t removed_rx_burst(void *, struct rte_mbuf **, uint16_t);
-
-/* mlx5_rxtx_mr.c */
-struct ibv_mr *mlx5_mp2mr(struct ibv_pd *, const struct rte_mempool *);
-void txq_mp2mr_iter(const struct rte_mempool *, void *);
-uint32_t txq_mp2mr_reg(struct ftxq *, const struct rte_mempool *, unsigned int);
 
 #endif /* RTE_PMD_MLX5_RXTX_H_ */

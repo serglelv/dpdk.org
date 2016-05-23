@@ -471,7 +471,7 @@ s32 e1000_setup_link(struct e1000_hw *hw)
  *  variables passed in. This is a function pointer entry point called
  *  by drivers.
  **/
-s32 e1000_get_speed_and_duplex(struct e1000_hw *hw, u32 *speed, u16 *duplex)
+s32 e1000_get_speed_and_duplex(struct e1000_hw *hw, u16 *speed, u16 *duplex)
 {
 	if (hw->mac.ops.get_link_up_info)
 		return hw->mac.ops.get_link_up_info(hw, speed, duplex);

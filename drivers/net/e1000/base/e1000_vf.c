@@ -43,7 +43,7 @@ STATIC s32 e1000_setup_link_vf(struct e1000_hw *hw);
 STATIC s32 e1000_get_bus_info_pcie_vf(struct e1000_hw *hw);
 STATIC s32 e1000_init_mac_params_vf(struct e1000_hw *hw);
 STATIC s32 e1000_check_for_link_vf(struct e1000_hw *hw);
-STATIC s32 e1000_get_link_up_info_vf(struct e1000_hw *hw, u32 *speed,
+STATIC s32 e1000_get_link_up_info_vf(struct e1000_hw *hw, u16 *speed,
 				     u16 *duplex);
 STATIC s32 e1000_init_hw_vf(struct e1000_hw *hw);
 STATIC s32 e1000_reset_hw_vf(struct e1000_hw *hw);
@@ -220,7 +220,7 @@ STATIC s32 e1000_get_bus_info_pcie_vf(struct e1000_hw *hw)
  *  Since we cannot read the PHY and get accurate link info, we must rely upon
  *  the status register's data which is often stale and inaccurate.
  **/
-STATIC s32 e1000_get_link_up_info_vf(struct e1000_hw *hw, u32 *speed,
+STATIC s32 e1000_get_link_up_info_vf(struct e1000_hw *hw, u16 *speed,
 				     u16 *duplex)
 {
 	s32 status;

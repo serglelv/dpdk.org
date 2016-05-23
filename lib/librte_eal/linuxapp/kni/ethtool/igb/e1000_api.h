@@ -52,7 +52,7 @@ s32 e1000_check_for_link(struct e1000_hw *hw);
 s32 e1000_reset_hw(struct e1000_hw *hw);
 s32 e1000_init_hw(struct e1000_hw *hw);
 s32 e1000_setup_link(struct e1000_hw *hw);
-s32 e1000_get_speed_and_duplex(struct e1000_hw *hw, u32 *speed, u16 *duplex);
+s32 e1000_get_speed_and_duplex(struct e1000_hw *hw, u16 *speed, u16 *duplex);
 s32 e1000_disable_pcie_master(struct e1000_hw *hw);
 void e1000_config_collision_dist(struct e1000_hw *hw);
 void e1000_rar_set(struct e1000_hw *hw, u8 *addr, u32 index);

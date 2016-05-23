@@ -53,7 +53,7 @@ STATIC void e1000_release_nvm_82575(struct e1000_hw *hw);
 STATIC s32  e1000_check_for_link_82575(struct e1000_hw *hw);
 STATIC s32  e1000_check_for_link_media_swap(struct e1000_hw *hw);
 STATIC s32  e1000_get_cfg_done_82575(struct e1000_hw *hw);
-STATIC s32  e1000_get_link_up_info_82575(struct e1000_hw *hw, u32 *speed,
+STATIC s32  e1000_get_link_up_info_82575(struct e1000_hw *hw, u16 *speed,
 					 u16 *duplex);
 STATIC s32  e1000_phy_hw_reset_sgmii_82575(struct e1000_hw *hw);
 STATIC s32  e1000_read_phy_reg_sgmii_82575(struct e1000_hw *hw, u32 offset,
@@ -80,7 +80,7 @@ STATIC s32  e1000_write_phy_reg_sgmii_82575(struct e1000_hw *hw,
 STATIC void e1000_clear_hw_cntrs_82575(struct e1000_hw *hw);
 STATIC s32  e1000_acquire_swfw_sync_82575(struct e1000_hw *hw, u16 mask);
 STATIC s32  e1000_get_pcs_speed_and_duplex_82575(struct e1000_hw *hw,
-						 u32 *speed, u16 *duplex);
+						 u16 *speed, u16 *duplex);
 STATIC s32  e1000_get_phy_id_82575(struct e1000_hw *hw);
 STATIC void e1000_release_swfw_sync_82575(struct e1000_hw *hw, u16 mask);
 STATIC bool e1000_sgmii_active_82575(struct e1000_hw *hw);
@@ -1167,7 +1167,7 @@ STATIC s32 e1000_get_cfg_done_82575(struct e1000_hw *hw)
  *  interface, use PCS to retrieve the link speed and duplex information.
  *  Otherwise, use the generic function to get the link speed and duplex info.
  **/
-STATIC s32 e1000_get_link_up_info_82575(struct e1000_hw *hw, u32 *speed,
+STATIC s32 e1000_get_link_up_info_82575(struct e1000_hw *hw, u16 *speed,
 					u16 *duplex)
 {
 	s32 ret_val;
@@ -1194,8 +1194,7 @@ STATIC s32 e1000_get_link_up_info_82575(struct e1000_hw *hw, u32 *speed,
 STATIC s32 e1000_check_for_link_82575(struct e1000_hw *hw)
 {
 	s32 ret_val;
-	u32 speed;
-	u16 duplex;
+	u16 speed, duplex;
 
 	DEBUGFUNC("e1000_check_for_link_82575");
 
@@ -1326,7 +1325,7 @@ STATIC void e1000_power_up_serdes_link_82575(struct e1000_hw *hw)
  *  duplex, then store the values in the pointers provided.
  **/
 STATIC s32 e1000_get_pcs_speed_and_duplex_82575(struct e1000_hw *hw,
-						u32 *speed, u16 *duplex)
+						u16 *speed, u16 *duplex)
 {
 	struct e1000_mac_info *mac = &hw->mac;
 	u32 pcs;
