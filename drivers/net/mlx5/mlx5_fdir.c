@@ -415,7 +415,7 @@ static struct fdir_queue *
 priv_get_fdir_queue(struct priv *priv, uint16_t idx)
 {
 	struct rxq_ctrl *rxq_ctrl =
-		container_of(&(*priv->rxqs)[idx], struct rxq_ctrl, rxq);
+		container_of((*priv->rxqs)[idx], struct rxq_ctrl, rxq);
 	struct fdir_queue *fdir_queue = &rxq_ctrl->fdir_queue;
 	struct ibv_exp_rwq_ind_table *ind_table = NULL;
 	struct ibv_qp *qp = NULL;
