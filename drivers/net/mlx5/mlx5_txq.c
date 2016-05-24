@@ -309,8 +309,12 @@ txq_ctrl_setup(struct rte_eth_dev *dev, struct txq_ctrl *txq_ctrl,
 			.max_send_wr = ((priv->device_attr.max_qp_wr < desc) ?
 					priv->device_attr.max_qp_wr :
 					desc),
-			/* Max number of scatter/gather elements in a WR. */
-			.max_send_sge = priv->device_attr.max_sge,
+			/* Max number of scatter/gather elements in a WR,
+			 * must be 1 to prevent libmlx5 from trying to affect
+			 * too much memory. TX gather is not impacted by the
+			 * priv->device_attr.max_sge limit and will still work
+			 * properly. */
+			.max_send_sge = 1,
 		},
 		.qp_type = IBV_QPT_RAW_PACKET,
 		/* Do *NOT* enable this, completions events are managed per
