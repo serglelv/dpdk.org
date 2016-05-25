@@ -591,7 +591,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	unsigned int j = 0;
 	unsigned int max;
 	unsigned int comp;
-	volatile union mlx5_wqe *wqe;
+	volatile union mlx5_wqe *wqe = NULL;
 
 	if (unlikely(!pkts_n))
 		return 0;
@@ -737,7 +737,7 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	unsigned int j = 0;
 	unsigned int max;
 	unsigned int comp;
-	volatile union mlx5_wqe *wqe;
+	volatile union mlx5_wqe *wqe = NULL;
 	unsigned int max_inline = txq->max_inline;
 
 	if (unlikely(!pkts_n))
