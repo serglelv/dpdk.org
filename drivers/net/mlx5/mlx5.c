@@ -250,34 +250,6 @@ mlx5_dev_idx(struct rte_pci_addr *pci_addr)
 }
 
 /**
- * Convert a string argument to unsigned long.
- *
- * @param[in] key
- *   Key argument to verify.
- * @param[in] val
- *   Value associated with key.
- * @param[out] value
- *   Pointer to user value.
- *
- * @return
- *   0 on success, errno value on failure.
- */
-static int
-mlx5_args_convert(const char *key, const char *val, unsigned long *value)
-{
-	unsigned long tmp;
-
-	errno = 0;
-	tmp = strtoul(val, NULL, 0);
-	if (errno)
-		WARN("%s: \"%s\" cannot be converted to integer type",
-		     key, val);
-	else
-		*value = tmp;
-	return errno;
-}
-
-/**
  * Verify and store value for device argument.
  *
  * @param[in] key
@@ -294,27 +266,21 @@ static int
 mlx5_args_check(const char *key, const char *val, void *opaque)
 {
 	struct priv *priv = opaque;
+	unsigned long tmp;
 
-	if (strcmp(MLX5_TXQ_INLINE, key) == 0) {
-		unsigned long value;
-		int ret;
+	errno = 0;
+	tmp = strtoul(val, NULL, 0);
+	if (errno) {
+		WARN("%s: \"%s\" is not a valid integer", key, val);
+		return errno;
+	}
 
-		ret = mlx5_args_convert(key, val, &value);
-		if (ret != 0)
-			priv->txq_inline = 0;
-		else
-			priv->txq_inline = value;
-	} else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0) {
-		unsigned long value;
-		int ret;
-
-		ret = mlx5_args_convert(key, val, &value);
-		if (ret != 0)
-			priv->txqs_inline = 0;
-		else
-			priv->txqs_inline = value;
-	} else if (strcmp(MLX5_TXQ_MPW_EN, key) == 0)
-		priv->mps = atoi(val);
+	if (strcmp(MLX5_TXQ_INLINE, key) == 0)
+		priv->txq_inline = tmp;
+	else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0)
+		priv->txqs_inline = tmp;
+	else if (strcmp(MLX5_TXQ_MPW_EN, key) == 0)
+		priv->mps = !!tmp;
 	else {
 		WARN("%s: unknown parameter", key);
 		return EINVAL;
