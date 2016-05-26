@@ -79,6 +79,9 @@
 /* Device parameter to enable multi-packet send WQEs. */
 #define MLX5_TXQ_MPW_EN "txq_mpw_en"
 
+/* Device parameter to enable RX completion queue compression. */
+#define MLX5_RXQ_CQE_COMP_EN "rxq_cqe_comp_en"
+
 /**
  * Retrieve integer value from environment variable.
  *
@@ -281,6 +284,8 @@ mlx5_args_check(const char *key, const char *val, void *opaque)
 		priv->txqs_inline = tmp;
 	else if (strcmp(MLX5_TXQ_MPW_EN, key) == 0)
 		priv->mps = !!tmp;
+	else if (strcmp(MLX5_RXQ_CQE_COMP_EN, key) == 0)
+		priv->cqe_comp = !!tmp;
 	else {
 		WARN("%s: unknown parameter", key);
 		return EINVAL;
@@ -306,6 +311,7 @@ mlx5_args(struct priv *priv, struct rte_devargs *devargs)
 		MLX5_TXQ_INLINE,
 		MLX5_TXQS_MIN_INLINE,
 		MLX5_TXQ_MPW_EN,
+		MLX5_RXQ_CQE_COMP_EN,
 	};
 	struct rte_kvargs *kvlist;
 	int ret = 0;
@@ -500,6 +506,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		priv->port = port;
 		priv->pd = pd;
 		priv->mtu = ETHER_MTU;
+		priv->cqe_comp = 1; /* Enable compression by default. */
 		err = mlx5_args(priv, pci_dev->devargs);
 		if (err) {
 			ERROR("failed to process device arguments: %s",

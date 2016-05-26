@@ -930,6 +930,7 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 	enum ibv_exp_query_intf_status status;
 	unsigned int mb_len = rte_pktmbuf_data_room_size(mp);
 	struct rte_mbuf *(*elts)[desc] = NULL;
+	unsigned int cqe_n = desc - 1;
 	int ret = 0;
 
 	(void)conf; /* Thresholds configuration (ignored). */
@@ -996,12 +997,15 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 		goto error;
 	}
 	attr.cq = (struct ibv_exp_cq_init_attr){
-		.comp_mask = (IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN |
-			      IBV_EXP_CQ_INIT_ATTR_FLAGS),
-		.flags = IBV_EXP_CQ_COMPRESSED_CQE,
+		.comp_mask = IBV_EXP_CQ_INIT_ATTR_RES_DOMAIN,
 		.res_domain = tmpl.rd,
 	};
-	tmpl.cq = ibv_exp_create_cq(priv->ctx, (2 * desc) - 1, NULL, NULL, 0,
+	if (priv->cqe_comp) {
+		attr.cq.comp_mask |= IBV_EXP_CQ_INIT_ATTR_FLAGS;
+		attr.cq.flags |= IBV_EXP_CQ_COMPRESSED_CQE;
+		cqe_n = (desc * 2) - 1; /* Double the number of CQEs. */
+	}
+	tmpl.cq = ibv_exp_create_cq(priv->ctx, cqe_n, NULL, NULL, 0,
 				    &attr.cq);
 	if (tmpl.cq == NULL) {
 		ret = ENOMEM;
