@@ -89,7 +89,7 @@ struct mlx5_wqe_regular {
 	} ctrl;
 	struct mlx5_wqe_eth_seg eseg;
 	struct mlx5_wqe_data_seg dseg;
-} __rte_cache_aligned;
+} __attribute__((aligned(64)));
 
 /* Inline WQE. */
 struct mlx5_wqe_inl {
@@ -100,7 +100,7 @@ struct mlx5_wqe_inl {
 	struct mlx5_wqe_eth_seg eseg;
 	uint32_t byte_cnt;
 	uint8_t data[MLX5_WQE64_INL_DATA];
-} __rte_cache_aligned;
+} __attribute__((aligned(64)));
 
 /* Multi-packet WQE. */
 struct mlx5_wqe_mpw {
@@ -110,7 +110,7 @@ struct mlx5_wqe_mpw {
 	} ctrl;
 	struct mlx5_wqe_eth_seg_small eseg;
 	struct mlx5_wqe_data_seg dseg[2];
-} __rte_cache_aligned;
+} __attribute__((aligned(64)));
 
 /* Multi-packet WQE with inline. */
 struct mlx5_wqe_mpw_inl {
@@ -121,7 +121,7 @@ struct mlx5_wqe_mpw_inl {
 	struct mlx5_wqe_eth_seg_small eseg;
 	uint32_t byte_cnt;
 	uint8_t data[MLX5_MWQE64_INL_DATA];
-} __rte_cache_aligned;
+} __attribute__((aligned(64)));
 
 /* Union of all WQE types. */
 union mlx5_wqe {
