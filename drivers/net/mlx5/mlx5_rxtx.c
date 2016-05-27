@@ -773,15 +773,9 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Should we enable HW CKSUM offload */
 		if (buf->ol_flags &
 		    (PKT_TX_IP_CKSUM | PKT_TX_TCP_CKSUM | PKT_TX_UDP_CKSUM)) {
-			wqe->inl.eseg.cs_flags = MLX5_ETH_WQE_L3_CSUM |
+			wqe->inl.eseg.cs_flags =
+				MLX5_ETH_WQE_L3_CSUM |
 				MLX5_ETH_WQE_L4_CSUM;
-			/* HW does not support checksum offloads at arbitrary
-			 * offsets but automatically recognizes the packet
-			 * type. For inner L3/L4 checksums, only VXLAN (UDP)
-			 * tunnels are currently supported. */
-			if (RTE_ETH_IS_TUNNEL_PKT(buf->packet_type))
-				wqe->inl.eseg.cs_flags |=
-					IBV_EXP_QP_BURST_TUNNEL;
 		} else
 			wqe->inl.eseg.cs_flags = 0;
 		/* Retrieve buffer information. */
