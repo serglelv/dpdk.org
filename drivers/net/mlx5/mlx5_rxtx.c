@@ -1559,12 +1559,12 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			break;
 		}
 		if (!pkt) {
+			cqe = &(*rxq->cqes)[rxq->cq_ci & cqe_cnt];
 			len = mlx5_rx_poll_len(rxq, cqe, cqe_cnt);
 			if (len == 0) {
 				__rte_mbuf_raw_free(rep);
 				break;
 			}
-			cqe = &(*rxq->cqes)[rxq->cq_ci & cqe_cnt];
 			if (unlikely(len == -1)) {
 				/* RX error, packet is likely too large. */
 				__rte_mbuf_raw_free(rep);
