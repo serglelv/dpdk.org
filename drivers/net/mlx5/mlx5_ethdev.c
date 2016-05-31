@@ -781,7 +781,6 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 		priv_destroy_hash_rxqs(priv);
 		priv_fdir_disable(priv);
 		priv_dev_interrupt_handler_uninstall(priv, dev);
-		priv->started = 0;
 	}
 recover:
 	/* Reconfigure each RX queue. */
