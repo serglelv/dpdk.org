@@ -89,6 +89,7 @@ txq_alloc_elts(struct txq_ctrl *txq_ctrl, unsigned int elts_n)
 	DEBUG("%p: allocated and configured %u WRs", (void *)txq_ctrl, elts_n);
 	txq_ctrl->txq.elts_head = 0;
 	txq_ctrl->txq.elts_tail = 0;
+	txq_ctrl->txq.elts_comp = 0;
 }
 
 /**
@@ -108,6 +109,7 @@ txq_free_elts(struct txq_ctrl *txq_ctrl)
 	DEBUG("%p: freeing WRs", (void *)txq_ctrl);
 	txq_ctrl->txq.elts_head = 0;
 	txq_ctrl->txq.elts_tail = 0;
+	txq_ctrl->txq.elts_comp = 0;
 
 	while (elts_tail != elts_head) {
 		struct rte_mbuf *elt = (*elts)[elts_tail];

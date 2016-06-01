@@ -691,14 +691,16 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	if (unlikely(i == 0))
 		return 0;
 	/* Check whether completion threshold has been reached. */
-	comp = txq->elts_head - txq->elts_tail;
-	comp -= MLX5_TX_COMP_THRESH * (comp / MLX5_TX_COMP_THRESH);
-	if ((comp + i + j) >= MLX5_TX_COMP_THRESH) {
+	comp = txq->elts_comp + i + j;
+	assert(comp < txq->cqe_n);
+	if (comp >= MLX5_TX_COMP_THRESH) {
 		/* Request completion on last WQE. */
 		wqe->wqe.ctrl.data[2] = htonl(8);
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->wqe.ctrl.data[3] = elts_head;
-	}
+		txq->elts_comp = 0;
+	} else
+		txq->elts_comp = comp;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -844,14 +846,16 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	if (unlikely(i == 0))
 		return 0;
 	/* Check whether completion threshold has been reached. */
-	comp = txq->elts_head - txq->elts_tail;
-	comp -= MLX5_TX_COMP_THRESH * (comp / MLX5_TX_COMP_THRESH);
-	if ((comp + i + j) >= MLX5_TX_COMP_THRESH) {
+	comp = txq->elts_comp + i + j;
+	assert(comp < txq->cqe_n);
+	if (comp >= MLX5_TX_COMP_THRESH) {
 		/* Request completion on last WQE. */
 		wqe->inl.ctrl.data[2] = htonl(8);
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->inl.ctrl.data[3] = elts_head;
-	}
+		txq->elts_comp = 0;
+	} else
+		txq->elts_comp = comp;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -1040,17 +1044,19 @@ mlx5_tx_burst_mpw(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	if (unlikely(i == 0))
 		return 0;
 	/* Check whether completion threshold has been reached. */
-	comp = txq->elts_head - txq->elts_tail;
-	comp -= MLX5_TX_COMP_THRESH * (comp / MLX5_TX_COMP_THRESH);
 	/* "j" includes both packets and segments. */
-	if ((comp + j) >= MLX5_TX_COMP_THRESH) {
+	comp = txq->elts_comp + j;
+	assert(comp < txq->cqe_n);
+	if (comp >= MLX5_TX_COMP_THRESH) {
 		volatile union mlx5_wqe *wqe = mpw.wqe;
 
 		/* Request completion on last WQE. */
 		wqe->mpw.ctrl.data[2] = htonl(8);
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->mpw.ctrl.data[3] = elts_head;
-	}
+		txq->elts_comp = 0;
+	} else
+		txq->elts_comp = comp;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -1293,17 +1299,19 @@ mlx5_tx_burst_mpw_inline(void *dpdk_txq, struct rte_mbuf **pkts,
 	if (unlikely(i == 0))
 		return 0;
 	/* Check whether completion threshold has been reached. */
-	comp = txq->elts_head - txq->elts_tail;
-	comp -= MLX5_TX_COMP_THRESH * (comp / MLX5_TX_COMP_THRESH);
 	/* "j" includes both packets and segments. */
-	if ((comp + j) >= MLX5_TX_COMP_THRESH) {
+	comp = txq->elts_comp + j;
+	assert(comp < txq->cqe_n);
+	if (comp >= MLX5_TX_COMP_THRESH) {
 		volatile union mlx5_wqe *wqe = mpw.wqe;
 
 		/* Request completion on last WQE. */
 		wqe->mpw_inl.ctrl.data[2] = htonl(8);
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->mpw_inl.ctrl.data[3] = elts_head;
-	}
+		txq->elts_comp = 0;
+	} else
+		txq->elts_comp = comp;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;

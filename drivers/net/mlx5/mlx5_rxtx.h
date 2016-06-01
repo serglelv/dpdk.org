@@ -241,6 +241,7 @@ struct hash_rxq {
 struct txq {
 	uint16_t elts_head; /* Current index in (*elts)[]. */
 	uint16_t elts_tail; /* First element awaiting completion. */
+	uint16_t elts_comp; /* Counter since last completion request. */
 	uint16_t elts_n; /* (*elts)[] length. */
 	uint16_t cq_ci; /* Consumer index for completion queue. */
 	uint16_t cqe_n; /* Number of CQ elements. */
