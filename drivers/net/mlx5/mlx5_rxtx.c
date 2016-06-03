@@ -692,7 +692,6 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		return 0;
 	/* Check whether completion threshold has been reached. */
 	comp = txq->elts_comp + i + j;
-	assert(comp < txq->cqe_n);
 	if (comp >= MLX5_TX_COMP_THRESH) {
 		/* Request completion on last WQE. */
 		wqe->wqe.ctrl.data[2] = htonl(8);
@@ -847,7 +846,6 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		return 0;
 	/* Check whether completion threshold has been reached. */
 	comp = txq->elts_comp + i + j;
-	assert(comp < txq->cqe_n);
 	if (comp >= MLX5_TX_COMP_THRESH) {
 		/* Request completion on last WQE. */
 		wqe->inl.ctrl.data[2] = htonl(8);
@@ -1046,7 +1044,6 @@ mlx5_tx_burst_mpw(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	/* Check whether completion threshold has been reached. */
 	/* "j" includes both packets and segments. */
 	comp = txq->elts_comp + j;
-	assert(comp < txq->cqe_n);
 	if (comp >= MLX5_TX_COMP_THRESH) {
 		volatile union mlx5_wqe *wqe = mpw.wqe;
 
@@ -1301,7 +1298,6 @@ mlx5_tx_burst_mpw_inline(void *dpdk_txq, struct rte_mbuf **pkts,
 	/* Check whether completion threshold has been reached. */
 	/* "j" includes both packets and segments. */
 	comp = txq->elts_comp + j;
-	assert(comp < txq->cqe_n);
 	if (comp >= MLX5_TX_COMP_THRESH) {
 		volatile union mlx5_wqe *wqe = mpw.wqe;
 
