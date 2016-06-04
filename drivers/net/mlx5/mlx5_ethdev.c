@@ -1395,6 +1395,10 @@ priv_select_tx_function(struct priv *priv)
 		priv->dev->tx_pkt_burst = mlx5_tx_burst_inline;
 		DEBUG("selected inline TX function (%u >= %u queues)",
 		      priv->txqs_n, priv->txqs_inline);
+	}else if (priv->txq_inline_new && (priv->txqs_n >= priv->txqs_inline)) {
+		priv->dev->tx_pkt_burst = mlx5_tx_burst_inline_new;
+		DEBUG("selected new inline TX function (%u >= %u queues)",
+		     priv->txqs_n, priv->txqs_inline);
 	}
 }
 

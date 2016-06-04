@@ -331,6 +331,10 @@ txq_ctrl_setup(struct rte_eth_dev *dev, struct txq_ctrl *txq_ctrl,
 		tmpl.txq.max_inline = priv->txq_inline;
 		attr.init.cap.max_inline_data = tmpl.txq.max_inline;
 	}
+	if (priv->txq_inline_new && priv->txqs_n >= priv->txqs_inline) {
+			tmpl.txq.max_inline = priv->txq_inline_new;
+			attr.init.cap.max_inline_data = tmpl.txq.max_inline;
+	}
 	tmpl.qp = ibv_exp_create_qp(priv->ctx, &attr.init);
 	if (tmpl.qp == NULL) {
 		ret = (errno ? errno : EINVAL);

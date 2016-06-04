@@ -72,6 +72,9 @@
 /* Device parameter to configure inline send. */
 #define MLX5_TXQ_INLINE "txq_inline"
 
+/* Device parameter to configure inline send. */
+#define MLX5_TXQ_INLINE_NEW "txq_inline_new"
+
 /* Device parameter to configure the number of TX queues threshold for
  * enabling inline send. */
 #define MLX5_TXQS_MIN_INLINE "txqs_min_inline"
@@ -280,6 +283,8 @@ mlx5_args_check(const char *key, const char *val, void *opaque)
 
 	if (strcmp(MLX5_TXQ_INLINE, key) == 0)
 		priv->txq_inline = tmp;
+	else if(strcmp(MLX5_TXQ_INLINE_NEW, key) == 0)
+		priv->txq_inline_new = tmp;
 	else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0)
 		priv->txqs_inline = tmp;
 	else if (strcmp(MLX5_TXQ_MPW_EN, key) == 0)
@@ -309,6 +314,7 @@ mlx5_args(struct priv *priv, struct rte_devargs *devargs)
 {
 	static const char *params[] = {
 		MLX5_TXQ_INLINE,
+		MLX5_TXQ_INLINE_NEW,
 		MLX5_TXQS_MIN_INLINE,
 		MLX5_TXQ_MPW_EN,
 		MLX5_RXQ_CQE_COMP_EN,
