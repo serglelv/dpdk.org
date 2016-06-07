@@ -3531,7 +3531,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 	unsigned int i, k;
 	struct ibv_exp_qp_attr mod;
 	struct ibv_recv_wr *bad_wr;
-	unsigned int mb_len = rte_pktmbuf_data_room_size(rxq->mp);
+	unsigned int mb_len;
 	int err;
 	int parent = (rxq == &priv->rxq_parent);
 
@@ -3540,6 +3540,7 @@ rxq_rehash(struct rte_eth_dev *dev, struct rxq *rxq)
 		      (void *)dev, (void *)rxq);
 		return EINVAL;
 	}
+	mb_len = rte_pktmbuf_data_room_size(rxq->mp);
 	DEBUG("%p: rehashing queue %p", (void *)dev, (void *)rxq);
 	/* Number of descriptors and mbufs currently allocated. */
 	desc_n = (tmpl.elts_n * (tmpl.sp ? MLX4_PMD_SGE_WR_N : 1));
@@ -3748,7 +3749,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 	} attr;
 	enum ibv_exp_query_intf_status status;
 	struct ibv_recv_wr *bad_wr;
-	unsigned int mb_len = rte_pktmbuf_data_room_size(mp);
+	unsigned int mb_len;
 	int ret = 0;
 	int parent = (rxq == &priv->rxq_parent);
 
@@ -3764,6 +3765,7 @@ rxq_setup(struct rte_eth_dev *dev, struct rxq *rxq, uint16_t desc,
 		desc = 1;
 		goto skip_mr;
 	}
+	mb_len = rte_pktmbuf_data_room_size(mp);
 	if ((desc == 0) || (desc % MLX4_PMD_SGE_WR_N)) {
 		ERROR("%p: invalid number of RX descriptors (must be a"
 		      " multiple of %d)", (void *)dev, MLX4_PMD_SGE_WR_N);
