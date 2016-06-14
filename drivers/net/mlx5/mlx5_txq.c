@@ -196,14 +196,22 @@ txq_cleanup(struct txq_ctrl *txq_ctrl)
  *   Pointer to TX queue control template.
  * @param txq_ctrl
  *   Pointer to TX queue control.
+ *
+ * @return
+ *   0 on success, errno value on failure.
  */
-static inline void
+static inline int
 txq_setup(struct txq_ctrl *tmpl, struct txq_ctrl *txq_ctrl)
 {
 	struct mlx5_qp *qp = to_mqp(tmpl->qp);
 	struct ibv_cq *ibcq = tmpl->cq;
 	struct mlx5_cq *cq = to_mxxx(cq, cq);
 
+	if (cq->cqe_sz != RTE_CACHE_LINE_SIZE) {
+		ERROR("Wrong MLX5_CQE_SIZE environment variable value: "
+		      "it should be set to %u", RTE_CACHE_LINE_SIZE);
+		return EINVAL;
+	}
 	tmpl->txq.cqe_n = ibcq->cqe + 1;
 	tmpl->txq.qp_num_8s = qp->ctrl_seg.qp_num << 8;
 	tmpl->txq.wqes =
@@ -216,11 +224,12 @@ txq_setup(struct txq_ctrl *tmpl, struct txq_ctrl *txq_ctrl)
 	tmpl->txq.bf_buf_size = qp->gen_data.bf->buf_size;
 	tmpl->txq.cq_db = cq->dbrec;
 	tmpl->txq.cqes =
-		(volatile struct mlx5_cqe64 (*)[])
+		(volatile struct mlx5_cqe (*)[])
 		(uintptr_t)cq->active_buf->buf;
 	tmpl->txq.elts =
 		(struct rte_mbuf *(*)[tmpl->txq.elts_n])
 		((uintptr_t)txq_ctrl + sizeof(*txq_ctrl));
+	return 0;
 }
 
 /**
@@ -360,7 +369,12 @@ txq_ctrl_setup(struct rte_eth_dev *dev, struct txq_ctrl *txq_ctrl,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	txq_setup(&tmpl, txq_ctrl);
+	ret = txq_setup(&tmpl, txq_ctrl);
+	if (ret) {
+		ERROR("%p: cannot initialize TX queue structure: %s",
+		      (void *)dev, strerror(ret));
+		goto error;
+	}
 	txq_alloc_elts(&tmpl, desc);
 	attr.mod = (struct ibv_exp_qp_attr){
 		.qp_state = IBV_QPS_RTR

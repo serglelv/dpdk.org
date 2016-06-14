@@ -873,6 +873,11 @@ rxq_setup(struct rxq_ctrl *tmpl)
 
 	if (elts == NULL)
 		return ENOMEM;
+	if (cq->cqe_sz != RTE_CACHE_LINE_SIZE) {
+		ERROR("Wrong MLX5_CQE_SIZE environment variable value: "
+		      "it should be set to %u", RTE_CACHE_LINE_SIZE);
+		return EINVAL;
+	}
 	tmpl->rxq.rq_db = rwq->rq.db;
 	tmpl->rxq.cqe_n = ibcq->cqe + 1;
 	tmpl->rxq.cq_ci = 0;
@@ -882,7 +887,7 @@ rxq_setup(struct rxq_ctrl *tmpl)
 		(volatile struct mlx5_wqe_data_seg (*)[])
 		(uintptr_t)rwq->rq.buff;
 	tmpl->rxq.cqes =
-		(volatile struct mlx5_cqe64 (*)[])
+		(volatile struct mlx5_cqe (*)[])
 		(uintptr_t)cq->active_buf->buf;
 	tmpl->rxq.elts = elts;
 	return 0;

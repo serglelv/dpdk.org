@@ -152,4 +152,12 @@ struct mlx5_mpw {
 	} data;
 };
 
+/* CQ element structure - should be equal to the cache line size */
+struct mlx5_cqe {
+#if (RTE_CACHE_LINE_SIZE == 128)
+	uint8_t padding[64];
+#endif
+	struct mlx5_cqe64 cqe64;
+};
+
 #endif /* RTE_PMD_MLX5_PRM_H_ */

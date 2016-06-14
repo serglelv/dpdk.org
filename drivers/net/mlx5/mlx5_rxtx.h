@@ -115,7 +115,7 @@ struct rxq {
 	uint16_t cqe_n; /* Number of CQ elements. */
 	uint16_t port_id;
 	volatile struct mlx5_wqe_data_seg(*wqes)[];
-	volatile struct mlx5_cqe64(*cqes)[];
+	volatile struct mlx5_cqe(*cqes)[];
 	struct rxq_zip zip; /* Compressed context. */
 	volatile uint32_t *rq_db;
 	volatile uint32_t *cq_db;
@@ -251,7 +251,7 @@ struct txq {
 	uint16_t bf_buf_size; /* Blueflame size. */
 	uint16_t max_inline; /* Maximum size to inline in a WQE. */
 	uint32_t qp_num_8s; /* QP number shifted by 8. */
-	volatile struct mlx5_cqe64 (*cqes)[]; /* Completion queue. */
+	volatile struct mlx5_cqe (*cqes)[]; /* Completion queue. */
 	volatile union mlx5_wqe (*wqes)[]; /* Work queue. */
 	volatile uint32_t *qp_db; /* Work queue doorbell. */
 	volatile uint32_t *cq_db; /* Completion queue doorbell. */

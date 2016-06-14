@@ -173,7 +173,7 @@ txq_complete(struct txq *txq)
 	do {
 		volatile struct mlx5_cqe64 *tmp;
 
-		tmp = &(*txq->cqes)[cq_ci & cqe_cnt];
+		tmp = &(*txq->cqes)[cq_ci & cqe_cnt].cqe64;
 		if (check_cqe64(tmp, cqe_n, cq_ci))
 			break;
 		cqe = tmp;
@@ -652,7 +652,7 @@ tx_prefetch_cqe(struct txq *txq, uint16_t ci)
 {
 	volatile struct mlx5_cqe64 *cqe;
 
-	cqe = &(*txq->cqes)[ci & (txq->cqe_n - 1)];
+	cqe = &(*txq->cqes)[ci & (txq->cqe_n - 1)].cqe64;
 	rte_prefetch0(cqe);
 }
 
@@ -1650,7 +1650,7 @@ mlx5_rx_poll_len(struct rxq *rxq, volatile struct mlx5_cqe64 *cqe,
 	if (zip->ai) {
 		volatile struct mlx5_mini_cqe8 (*mc)[8] =
 			(volatile struct mlx5_mini_cqe8 (*)[8])
-			(uintptr_t)&(*rxq->cqes)[zip->ca & cqe_cnt];
+			(uintptr_t)(&(*rxq->cqes)[zip->ca & cqe_cnt].cqe64);
 
 		len = ntohl((*mc)[zip->ai & 7].byte_cnt);
 		if ((++zip->ai & 7) == 0) {
@@ -1665,7 +1665,7 @@ mlx5_rx_poll_len(struct rxq *rxq, volatile struct mlx5_cqe64 *cqe,
 			uint16_t end = zip->cq_ci;
 
 			while (idx != end) {
-				(*rxq->cqes)[idx & cqe_cnt].op_own =
+				(*rxq->cqes)[idx & cqe_cnt].cqe64.op_own =
 					MLX5_CQE_INVALIDATE;
 				++idx;
 			}
@@ -1686,7 +1686,7 @@ mlx5_rx_poll_len(struct rxq *rxq, volatile struct mlx5_cqe64 *cqe,
 			volatile struct mlx5_mini_cqe8 (*mc)[8] =
 				(volatile struct mlx5_mini_cqe8 (*)[8])
 				(uintptr_t)&(*rxq->cqes)[rxq->cq_ci &
-							 cqe_cnt];
+							 cqe_cnt].cqe64;
 
 			/* Fix endianness. */
 			zip->cqe_cnt = ntohl(cqe->byte_cnt);
@@ -1784,10 +1784,11 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	const unsigned int sges_n = rxq->sges_n;
 	struct rte_mbuf *pkt = NULL;
 	struct rte_mbuf *seg = NULL;
-	volatile struct mlx5_cqe64 *cqe = &(*rxq->cqes)[rxq->cq_ci & cqe_cnt];
 	unsigned int i = 0;
 	unsigned int rq_ci = rxq->rq_ci << sges_n;
 	int len;
+	volatile struct mlx5_cqe64 *cqe =
+		     &(*rxq->cqes)[rxq->cq_ci & cqe_cnt].cqe64;
 
 	while (pkts_n) {
 		unsigned int idx = rq_ci & wqe_cnt;
@@ -1811,7 +1812,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			break;
 		}
 		if (!pkt) {
-			cqe = &(*rxq->cqes)[rxq->cq_ci & cqe_cnt];
+			cqe = &(*rxq->cqes)[rxq->cq_ci & cqe_cnt].cqe64;
 			len = mlx5_rx_poll_len(rxq, cqe, cqe_cnt);
 			if (len == 0) {
 				__rte_mbuf_raw_free(rep);
