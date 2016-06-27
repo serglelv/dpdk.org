@@ -231,6 +231,20 @@ for conf in $configs ; do
 	make -j$J -sC examples/performance-thread \
 		EXTRA_LDFLAGS="$DPDK_DEP_LDFLAGS" $verbose \
 		O=$(readlink -m $dir/examples/performance-thread)
+	echo "================== Check includes in $dir"
+	if echo $target | grep -q 'gcc'; then
+		CC=gcc
+		CXX=g++
+	elif echo $target | grep -q 'clang'; then
+		CC=clang
+		CXX=clang++
+	else
+		CXX=$CC
+	fi
+	CC=$CROSS$CC CXX=$CROSS$CXX \
+		VERBOSE="$((! ! ${#verbose}))" \
+		QUIET="$((! ${#verbose}))" \
+		scripts/check-includes.sh "$dir/include"
 	unset RTE_TARGET
 	echo "################## $dir done."
 	unset dir
