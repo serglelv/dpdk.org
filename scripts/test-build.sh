@@ -155,6 +155,21 @@ for conf in $configs ; do
 		echo "================== Build examples for $dir"
 		make -j$J -sC examples RTE_SDK=$(pwd) RTE_TARGET=$dir O=$(readlink -m $dir/examples) EXTRA_LDFLAGS="$DPDK_DEP_LDFLAGS"
 	fi
+	echo "================== Check includes in $dir"
+	if echo $target | grep -q 'gcc'; then
+		CC=gcc
+		CXX=g++
+	elif echo $target | grep -q 'clang'; then
+		CC=clang
+		CXX=clang++
+	else
+		CXX=$CC
+	fi
+	CXX=: # We do not care about CXX errors.
+	CC=$CROSS$CC CXX=$CROSS$CXX \
+		VERBOSE=0 \
+		QUIET=1 \
+		scripts/check-includes.sh "$dir/include"
 	echo "################## $dir done."
 	! $short || break
 done
