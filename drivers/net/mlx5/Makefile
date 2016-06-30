@@ -54,12 +54,15 @@ DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_ether
 DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_mbuf
 DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_eal
 DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_mempool
+DEPDIRS-$(CONFIG_RTE_LIBRTE_MLX5_PMD) += lib/librte_kvargs
 
 # Basic CFLAGS.
 CFLAGS += -O3
 CFLAGS += -std=gnu99 -Wall -Wextra
 CFLAGS += -g
 CFLAGS += -I.
+CFLAGS += -D_BSD_SOURCE
+CFLAGS += -D_DEFAULT_SOURCE
 CFLAGS += -D_XOPEN_SOURCE=600
 CFLAGS += $(WERROR_FLAGS)
 CFLAGS += -Wno-strict-prototypes
@@ -99,7 +102,9 @@ ifndef V
 AUTOCONF_OUTPUT := >/dev/null
 endif
 
-mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
+mlx5_autoconf.h.new: FORCE
+
+mlx5_autoconf.h.new: $(RTE_SDK)/scripts/auto-config-h.sh
 	$Q $(RM) -f -- '$@'
 	$Q sh -- '$<' '$@' \
 		HAVE_VERBS_IBV_EXP_CQ_COMPRESSED_CQE \
@@ -112,9 +117,16 @@ mlx5_autoconf.h: $(RTE_SDK)/scripts/auto-config-h.sh
 		enum MLX5_ETH_VLAN_INLINE_HEADER_SIZE \
 		$(AUTOCONF_OUTPUT)
 
+# Create mlx5_autoconf.h or update it in case it differs from the new one.
+
+mlx5_autoconf.h: mlx5_autoconf.h.new
+	$Q [ -f '$@' ] && \
+		cmp '$<' '$@' $(AUTOCONF_OUTPUT) || \
+		mv '$<' '$@'
+
 $(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_PMD):.c=.o): mlx5_autoconf.h
 
 clean_mlx5: FORCE
-	$Q rm -f -- mlx5_autoconf.h
+	$Q rm -f -- mlx5_autoconf.h mlx5_autoconf.h.new
 
 clean: clean_mlx5

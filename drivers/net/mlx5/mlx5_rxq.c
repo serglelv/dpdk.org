@@ -269,7 +269,7 @@ priv_flow_attr(struct priv *priv, struct ibv_exp_flow_attr *flow_attr,
 static enum hash_rxq_type
 hash_rxq_type_from_pos(const struct ind_table_init *table, unsigned int pos)
 {
-	enum hash_rxq_type type = 0;
+	enum hash_rxq_type type = HASH_RXQ_TCPV4;
 
 	assert(pos < table->hash_types_n);
 	do {
@@ -609,9 +609,11 @@ priv_allow_flow_type(struct priv *priv, enum hash_rxq_flow_type type)
 int
 priv_rehash_flows(struct priv *priv)
 {
-	unsigned int i;
+	enum hash_rxq_flow_type i;
 
-	for (i = 0; (i != RTE_DIM((*priv->hash_rxqs)[0].special_flow)); ++i)
+	for (i = HASH_RXQ_FLOW_TYPE_PROMISC;
+			i != RTE_DIM((*priv->hash_rxqs)[0].special_flow);
+			++i)
 		if (!priv_allow_flow_type(priv, i)) {
 			priv_special_flow_disable(priv, i);
 		} else {
@@ -871,6 +873,11 @@ rxq_setup(struct rxq_ctrl *tmpl)
 	struct rte_mbuf *(*elts)[tmpl->rxq.elts_n] =
 		rte_calloc_socket("RXQ", 1, sizeof(*elts), 0, tmpl->socket);
 
+	if (cq->cqe_sz != RTE_CACHE_LINE_SIZE) {
+		ERROR("Wrong MLX5_CQE_SIZE environment variable value: "
+		      "it should be set to %u", RTE_CACHE_LINE_SIZE);
+		return EINVAL;
+	}
 	if (elts == NULL)
 		return ENOMEM;
 	if (cq->cqe_sz != RTE_CACHE_LINE_SIZE) {
@@ -936,8 +943,8 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 	} attr;
 	enum ibv_exp_query_intf_status status;
 	unsigned int mb_len = rte_pktmbuf_data_room_size(mp);
-	struct rte_mbuf *(*elts)[desc] = NULL;
 	unsigned int cqe_n = desc - 1;
+	struct rte_mbuf *(*elts)[desc] = NULL;
 	int ret = 0;
 
 	(void)conf; /* Thresholds configuration (ignored). */
@@ -951,8 +958,10 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 			dev->data->dev_conf.rxmode.max_rx_pkt_len;
 		unsigned int sges_n;
 
-		/* Determine the number of SGEs needed for a full packet
-		 * and round it to the next power of two. */
+		/*
+		 * Determine the number of SGEs needed for a full packet
+		 * and round it to the next power of two.
+		 */
 		sges_n = log2above((size / mb_len) + !!(size % mb_len));
 		tmpl.rxq.sges_n = sges_n;
 		/* Make sure rxq.sges_n did not overflow. */
@@ -981,7 +990,8 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 	if (priv->hw_csum)
 		tmpl.rxq.csum = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
 	if (priv->hw_csum_l2tun)
-		tmpl.rxq.csum_l2tun = !!dev->data->dev_conf.rxmode.hw_ip_checksum;
+		tmpl.rxq.csum_l2tun =
+			!!dev->data->dev_conf.rxmode.hw_ip_checksum;
 	/* Use the entire RX mempool as the memory region. */
 	tmpl.mr = mlx5_mp2mr(priv->pd, mp);
 	if (tmpl.mr == NULL) {
@@ -1085,8 +1095,10 @@ rxq_ctrl_setup(struct rte_eth_dev *dev, struct rxq_ctrl *rxq_ctrl,
 		      (void *)dev, strerror(ret));
 		goto error;
 	}
-	/* Make sure number of WRs*SGEs match expectations since a queue
-	 * cannot allocate more than "desc" buffers. */
+	/*
+	 * Make sure number of WRs*SGEs match expectations since a queue
+	 * cannot allocate more than "desc" buffers.
+	 */
 	if (((int)attr.wq.max_recv_wr != (desc >> tmpl.rxq.sges_n)) ||
 	    ((int)attr.wq.max_recv_sge != (1 << tmpl.rxq.sges_n))) {
 		ERROR("%p: requested %u*%u but got %u*%u WRs*SGEs",

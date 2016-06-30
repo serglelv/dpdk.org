@@ -89,8 +89,10 @@ check_cqe64_seen(volatile struct mlx5_cqe64 *cqe)
 	unsigned int i;
 
 	for (i = 0; i < sizeof(magic) && i < sizeof(*buf); ++i)
-		if (!ret || !(ret = ((*buf)[i] == magic[i])))
+		if (!ret || (*buf)[i] != magic[i]) {
+			ret = 0;
 			(*buf)[i] = magic[i];
+		}
 	return ret;
 }
 
@@ -571,12 +573,12 @@ mlx5_wqe_write_inline_vlan(struct txq *txq, volatile union mlx5_wqe *wqe,
 	 * Copy 4 bytes of VLAN.
 	 * Copy 2 bytes of Ether type.
 	 */
-	rte_memcpy((uint8_t*)(uintptr_t)wqe->inl.eseg.inline_hdr_start,
-		   (uint8_t*)addr, 12);
-	rte_memcpy((uint8_t*)(uintptr_t)wqe->inl.eseg.inline_hdr_start + 12,
+	rte_memcpy((uint8_t *)(uintptr_t)wqe->inl.eseg.inline_hdr_start,
+		   (uint8_t *)addr, 12);
+	rte_memcpy((uint8_t *)(uintptr_t)wqe->inl.eseg.inline_hdr_start + 12,
 		   &vlan, sizeof(vlan));
-	rte_memcpy((uint8_t*)(uintptr_t)wqe->inl.eseg.inline_hdr_start + 16,
-		   ((uint8_t*)addr + 12), 2);
+	rte_memcpy((uint8_t *)(uintptr_t)wqe->inl.eseg.inline_hdr_start + 16,
+		   ((uint8_t *)addr + 12), 2);
 	addr += MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	length -= MLX5_ETH_VLAN_INLINE_HEADER_SIZE - sizeof(vlan);
 	size = (sizeof(wqe->inl.ctrl.ctrl) +
@@ -719,8 +721,10 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		volatile struct mlx5_wqe_data_seg *dseg;
 		unsigned int ds = sizeof(*wqe) / 16;
 
-		/* Make sure there is enough room to store this packet and
-		 * that one ring entry remains unused. */
+		/*
+		 * Make sure there is enough room to store this packet and
+		 * that one ring entry remains unused.
+		 */
 		assert(segs_n);
 		if (max < segs_n + 1)
 			break;
@@ -754,12 +758,15 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			wqe->wqe.eseg.cs_flags =
 				MLX5_ETH_WQE_L3_CSUM |
 				MLX5_ETH_WQE_L4_CSUM;
-		} else
+		} else {
 			wqe->wqe.eseg.cs_flags = 0;
+		}
 		while (--segs_n) {
-			/* Spill on next WQE when the current one does not have
+			/*
+			 * Spill on next WQE when the current one does not have
 			 * enough room left. Size of WQE must a be a multiple
-			 * of data segment size. */
+			 * of data segment size.
+			 */
 			assert(!(sizeof(*wqe) % sizeof(*dseg)));
 			if (!(ds % (sizeof(*wqe) / 16)))
 				dseg = (volatile void *)
@@ -803,8 +810,9 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->wqe.ctrl.data[3] = elts_head;
 		txq->elts_comp = 0;
-	} else
+	} else {
 		txq->elts_comp = comp;
+	}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -862,8 +870,10 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		volatile struct mlx5_wqe_data_seg *dseg;
 		unsigned int ds = sizeof(*wqe) / 16;
 
-		/* Make sure there is enough room to store this packet and
-		 * that one ring entry remains unused. */
+		/*
+		 * Make sure there is enough room to store this packet and
+		 * that one ring entry remains unused.
+		 */
 		assert(segs_n);
 		if (max < segs_n + 1)
 			break;
@@ -882,8 +892,9 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 			wqe->inl.eseg.cs_flags =
 				MLX5_ETH_WQE_L3_CSUM |
 				MLX5_ETH_WQE_L4_CSUM;
-		} else
+		} else {
 			wqe->inl.eseg.cs_flags = 0;
+		}
 		/* Retrieve buffer information. */
 		addr = rte_pktmbuf_mtod(buf, uintptr_t);
 		length = DATA_LEN(buf);
@@ -911,9 +922,11 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 				mlx5_wqe_write(txq, wqe, addr, length, lkey);
 		}
 		while (--segs_n) {
-			/* Spill on next WQE when the current one does not have
+			/*
+			 * Spill on next WQE when the current one does not have
 			 * enough room left. Size of WQE must a be a multiple
-			 * of data segment size. */
+			 * of data segment size.
+			 */
 			assert(!(sizeof(*wqe) % sizeof(*dseg)));
 			if (!(ds % (sizeof(*wqe) / 16)))
 				dseg = (volatile void *)
@@ -938,7 +951,7 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Update DS field in WQE. */
 		wqe->inl.ctrl.data[1] &= htonl(0xffffffc0);
 		wqe->inl.ctrl.data[1] |= htonl(ds & 0x3f);
-	skip_segs:
+skip_segs:
 		elts_head = elts_head_next;
 #ifdef MLX5_PMD_SOFT_COUNTERS
 		/* Increment sent bytes counter. */
@@ -957,8 +970,9 @@ mlx5_tx_burst_inline(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->inl.ctrl.data[3] = elts_head;
 		txq->elts_comp = 0;
-	} else
+	} else {
 		txq->elts_comp = comp;
+	}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -1176,8 +1190,10 @@ mlx5_mpw_close(struct txq *txq, struct mlx5_mpw *mpw)
 {
 	unsigned int num = mpw->pkts_n;
 
-	/* Store size in multiple of 16 bytes. Control and Ethernet segments
-	 * count as 2. */
+	/*
+	 * Store size in multiple of 16 bytes. Control and Ethernet segments
+	 * count as 2.
+	 */
 	mpw->wqe->mpw.ctrl.data[1] = htonl(txq->qp_num_8s | (2 + num));
 	mpw->state = MLX5_MPW_STATE_CLOSED;
 	if (num < 3)
@@ -1233,8 +1249,10 @@ mlx5_tx_burst_mpw(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		unsigned int segs_n = buf->nb_segs;
 		uint32_t cs_flags = 0;
 
-		/* Make sure there is enough room to store this packet and
-		 * that one ring entry remains unused. */
+		/*
+		 * Make sure there is enough room to store this packet and
+		 * that one ring entry remains unused.
+		 */
 		assert(segs_n);
 		if (max < segs_n + 1)
 			break;
@@ -1311,8 +1329,9 @@ mlx5_tx_burst_mpw(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->mpw.ctrl.data[3] = elts_head;
 		txq->elts_comp = 0;
-	} else
+	} else {
 		txq->elts_comp = comp;
+	}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -1373,8 +1392,10 @@ mlx5_mpw_inline_close(struct txq *txq, struct mlx5_mpw *mpw)
 	unsigned int size;
 
 	size = sizeof(*mpw->wqe) - MLX5_MWQE64_INL_DATA + mpw->total_len;
-	/* Store size in multiple of 16 bytes. Control and Ethernet segments
-	 * count as 2. */
+	/*
+	 * Store size in multiple of 16 bytes. Control and Ethernet segments
+	 * count as 2.
+	 */
 	mpw->wqe->mpw_inl.ctrl.data[1] =
 		htonl(txq->qp_num_8s | ((size + 15) / 16));
 	mpw->state = MLX5_MPW_STATE_CLOSED;
@@ -1430,8 +1451,10 @@ mlx5_tx_burst_mpw_inline(void *dpdk_txq, struct rte_mbuf **pkts,
 		unsigned int segs_n = buf->nb_segs;
 		uint32_t cs_flags = 0;
 
-		/* Make sure there is enough room to store this packet and
-		 * that one ring entry remains unused. */
+		/*
+		 * Make sure there is enough room to store this packet and
+		 * that one ring entry remains unused.
+		 */
 		assert(segs_n);
 		if (max < segs_n + 1)
 			break;
@@ -1540,8 +1563,9 @@ mlx5_tx_burst_mpw_inline(void *dpdk_txq, struct rte_mbuf **pkts,
 			if (mpw.pkts_n == MLX5_MPW_DSEG_MAX) {
 				mlx5_mpw_inline_close(txq, &mpw);
 				inline_room = txq->max_inline;
-			} else
+			} else {
 				inline_room -= length;
+			}
 		}
 		mpw.total_len += length;
 		elts_head = elts_head_next;
@@ -1565,8 +1589,9 @@ mlx5_tx_burst_mpw_inline(void *dpdk_txq, struct rte_mbuf **pkts,
 		/* Save elts_head in unused "immediate" field of WQE. */
 		wqe->mpw_inl.ctrl.data[3] = elts_head;
 		txq->elts_comp = 0;
-	} else
+	} else {
 		txq->elts_comp = comp;
+	}
 #ifdef MLX5_PMD_SOFT_COUNTERS
 	/* Increment sent packets counter. */
 	txq->stats.opackets += i;
@@ -1654,9 +1679,11 @@ mlx5_rx_poll_len(struct rxq *rxq, volatile struct mlx5_cqe64 *cqe,
 
 		len = ntohl((*mc)[zip->ai & 7].byte_cnt);
 		if ((++zip->ai & 7) == 0) {
-			/* Increment consumer index to skip the number of
+			/*
+			 * Increment consumer index to skip the number of
 			 * CQEs consumed. Hardware leaves holes in the CQ
-			 * ring for software use. */
+			 * ring for software use.
+			 */
 			zip->ca = zip->na;
 			zip->na += 8;
 		}
@@ -1685,9 +1712,8 @@ mlx5_rx_poll_len(struct rxq *rxq, volatile struct mlx5_cqe64 *cqe,
 		if (MLX5_CQE_FORMAT(op_own) == MLX5_COMPRESSED) {
 			volatile struct mlx5_mini_cqe8 (*mc)[8] =
 				(volatile struct mlx5_mini_cqe8 (*)[8])
-				(uintptr_t)&(*rxq->cqes)[rxq->cq_ci &
-							 cqe_cnt].cqe64;
-
+				(uintptr_t)(&(*rxq->cqes)[rxq->cq_ci &
+							  cqe_cnt].cqe64);
 			/* Fix endianness. */
 			zip->cqe_cnt = ntohl(cqe->byte_cnt);
 			/*
@@ -1706,8 +1732,9 @@ mlx5_rx_poll_len(struct rxq *rxq, volatile struct mlx5_cqe64 *cqe,
 			/* Get packet size to return. */
 			len = ntohl((*mc)[0].byte_cnt);
 			zip->ai = 1;
-		} else
+		} else {
 			len = ntohl(cqe->byte_cnt);
+		}
 		/* Error while receiving packet. */
 		if (unlikely(MLX5_CQE_OPCODE(op_own) == MLX5_CQE_RESP_ERR))
 			return -1;
@@ -1784,11 +1811,11 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	const unsigned int sges_n = rxq->sges_n;
 	struct rte_mbuf *pkt = NULL;
 	struct rte_mbuf *seg = NULL;
+	volatile struct mlx5_cqe64 *cqe =
+		&(*rxq->cqes)[rxq->cq_ci & cqe_cnt].cqe64;
 	unsigned int i = 0;
 	unsigned int rq_ci = rxq->rq_ci << sges_n;
 	int len;
-	volatile struct mlx5_cqe64 *cqe =
-		     &(*rxq->cqes)[rxq->cq_ci & cqe_cnt].cqe64;
 
 	while (pkts_n) {
 		unsigned int idx = rq_ci & wqe_cnt;
@@ -1852,9 +1879,11 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		PORT(rep) = PORT(seg);
 		NEXT(rep) = NULL;
 		(*rxq->elts)[idx] = rep;
-		/* Fill NIC descriptor with the new buffer.  The lkey and size
+		/*
+		 * Fill NIC descriptor with the new buffer.  The lkey and size
 		 * of the buffers are already known, only the buffer address
-		 * changes. */
+		 * changes.
+		 */
 		wqe->addr = htonll(rte_pktmbuf_mtod(rep, uintptr_t));
 		if (len > DATA_LEN(seg)) {
 			len -= DATA_LEN(seg);
@@ -1872,7 +1901,7 @@ mlx5_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 		pkt = NULL;
 		--pkts_n;
 		++i;
-	skip:
+skip:
 		/* Align consumer index to the next stride. */
 		rq_ci >>= sges_n;
 		++rq_ci;

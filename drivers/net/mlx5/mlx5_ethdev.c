@@ -44,7 +44,6 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <linux/if.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <fcntl.h>
@@ -657,7 +656,7 @@ mlx5_link_update_unlocked(struct rte_eth_dev *dev, int wait_to_complete)
 	memset(&dev_link, 0, sizeof(dev_link));
 	dev_link.link_status = ((ifr.ifr_flags & IFF_UP) &&
 				(ifr.ifr_flags & IFF_RUNNING));
-	ifr.ifr_data = &edata;
+	ifr.ifr_data = (void *)&edata;
 	if (priv_ifreq(priv, SIOCETHTOOL, &ifr)) {
 		WARN("ioctl(SIOCETHTOOL, ETHTOOL_GSET) failed: %s",
 		     strerror(errno));
@@ -762,17 +761,21 @@ mlx5_dev_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 			continue;
 		mb_len = rte_pktmbuf_data_room_size(rxq->mp);
 		assert(mb_len >= RTE_PKTMBUF_HEADROOM);
-		/* Determine the number of SGEs needed for a full packet
-		 * and round it to the next power of two. */
+		/*
+		 * Determine the number of SGEs needed for a full packet
+		 * and round it to the next power of two.
+		 */
 		sges_n = log2above((size / mb_len) + !!(size % mb_len));
 		if (sges_n != rxq->sges_n)
 			break;
 	}
-	/* If all queues have the right number of SGEs, a simple rehash
+	/*
+	 * If all queues have the right number of SGEs, a simple rehash
 	 * of their buffers is enough, otherwise SGE information can only
 	 * be updated in a queue by recreating it. All resources that depend
 	 * on queues (flows, indirection tables) must be recreated as well in
-	 * that case. */
+	 * that case.
+	 */
 	rehash = (i == priv->rxqs_n);
 	if (!rehash) {
 		/* Clean up everything as with mlx5_dev_stop(). */
@@ -817,8 +820,10 @@ recover:
 		/* Double fault, disable RX. */
 		break;
 	}
-	/* Use a safe RX burst function in case of error, otherwise mimic
-	 * mlx5_dev_start(). */
+	/*
+	 * Use a safe RX burst function in case of error, otherwise mimic
+	 * mlx5_dev_start().
+	 */
 	if (ret) {
 		ERROR("unable to reconfigure RX queues, RX disabled");
 		rx_func = removed_rx_burst;
@@ -864,7 +869,7 @@ mlx5_dev_get_flow_ctrl(struct rte_eth_dev *dev, struct rte_eth_fc_conf *fc_conf)
 	if (mlx5_is_secondary())
 		return -E_RTE_SECONDARY;
 
-	ifr.ifr_data = &ethpause;
+	ifr.ifr_data = (void *)&ethpause;
 	priv_lock(priv);
 	if (priv_ifreq(priv, SIOCETHTOOL, &ifr)) {
 		ret = errno;
@@ -915,7 +920,7 @@ mlx5_dev_set_flow_ctrl(struct rte_eth_dev *dev, struct rte_eth_fc_conf *fc_conf)
 	if (mlx5_is_secondary())
 		return -E_RTE_SECONDARY;
 
-	ifr.ifr_data = &ethpause;
+	ifr.ifr_data = (void *)&ethpause;
 	ethpause.autoneg = fc_conf->autoneg;
 	if (((fc_conf->mode & RTE_FC_FULL) == RTE_FC_FULL) ||
 	    (fc_conf->mode & RTE_FC_RX_PAUSE))
@@ -1109,7 +1114,7 @@ priv_dev_interrupt_handler_uninstall(struct priv *priv, struct rte_eth_dev *dev)
 		rte_eal_alarm_cancel(mlx5_dev_link_status_handler, dev);
 	priv->pending_alarm = 0;
 	priv->intr_handle.fd = 0;
-	priv->intr_handle.type = 0;
+	priv->intr_handle.type = RTE_INTR_HANDLE_UNKNOWN;
 }
 
 /**
@@ -1311,7 +1316,8 @@ mlx5_secondary_data_setup(struct priv *priv)
 					   primary_txq->elts_n,
 					   primary_txq_ctrl->socket,
 					   NULL) == 0) {
-				txq_ctrl->txq.stats.idx = primary_txq->stats.idx;
+				txq_ctrl->txq.stats.idx =
+					primary_txq->stats.idx;
 				tx_queues[i] = &txq_ctrl->txq;
 				continue;
 			}

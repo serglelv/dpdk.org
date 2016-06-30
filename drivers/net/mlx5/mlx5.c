@@ -69,21 +69,23 @@
 #include "mlx5_autoconf.h"
 #include "mlx5_defs.h"
 
+/* Device parameter to enable RX completion queue compression. */
+#define MLX5_RXQ_CQE_COMP_EN "rxq_cqe_comp_en"
+
 /* Device parameter to configure inline send. */
 #define MLX5_TXQ_INLINE "txq_inline"
 
-/* Device parameter to configure inline send. */
+/* Device parameter to configure new inline send. */
 #define MLX5_TXQ_INLINE_NEW "txq_inline_new"
 
-/* Device parameter to configure the number of TX queues threshold for
- * enabling inline send. */
+/*
+ * Device parameter to configure the number of TX queues threshold for
+ * enabling inline send.
+ */
 #define MLX5_TXQS_MIN_INLINE "txqs_min_inline"
 
 /* Device parameter to enable multi-packet send WQEs. */
 #define MLX5_TXQ_MPW_EN "txq_mpw_en"
-
-/* Device parameter to enable RX completion queue compression. */
-#define MLX5_RXQ_CQE_COMP_EN "rxq_cqe_comp_en"
 
 /**
  * Retrieve integer value from environment variable.
@@ -266,7 +268,7 @@ mlx5_dev_idx(struct rte_pci_addr *pci_addr)
  *   User data.
  *
  * @return
- *   0 on success, errno value on failure.
+ *   0 on success, negative errno value on failure.
  */
 static int
 mlx5_args_check(const char *key, const char *val, void *opaque)
@@ -280,20 +282,19 @@ mlx5_args_check(const char *key, const char *val, void *opaque)
 		WARN("%s: \"%s\" is not a valid integer", key, val);
 		return errno;
 	}
-
-	if (strcmp(MLX5_TXQ_INLINE, key) == 0)
-		priv->txq_inline = tmp;
-	else if(strcmp(MLX5_TXQ_INLINE_NEW, key) == 0)
-		priv->txq_inline_new = tmp;
-	else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0)
-		priv->txqs_inline = tmp;
-	else if (strcmp(MLX5_TXQ_MPW_EN, key) == 0)
-		priv->mps = !!tmp;
-	else if (strcmp(MLX5_RXQ_CQE_COMP_EN, key) == 0)
+	if (strcmp(MLX5_RXQ_CQE_COMP_EN, key) == 0) {
 		priv->cqe_comp = !!tmp;
-	else {
+	} else if (strcmp(MLX5_TXQ_INLINE, key) == 0) {
+		priv->txq_inline = tmp;
+	} else if (strcmp(MLX5_TXQS_MIN_INLINE, key) == 0) {
+		priv->txqs_inline = tmp;
+	} else if (strcmp(MLX5_TXQ_MPW_EN, key) == 0) {
+		priv->mps = !!tmp;
+	} else if(strcmp(MLX5_TXQ_INLINE_NEW, key) == 0) {
+		priv->txq_inline_new = tmp;
+	} else {
 		WARN("%s: unknown parameter", key);
-		return EINVAL;
+		return -EINVAL;
 	}
 	return 0;
 }
@@ -312,12 +313,13 @@ mlx5_args_check(const char *key, const char *val, void *opaque)
 static int
 mlx5_args(struct priv *priv, struct rte_devargs *devargs)
 {
-	static const char *params[] = {
+	const char **params = (const char *[]){
+		MLX5_RXQ_CQE_COMP_EN,
 		MLX5_TXQ_INLINE,
 		MLX5_TXQ_INLINE_NEW,
 		MLX5_TXQS_MIN_INLINE,
 		MLX5_TXQ_MPW_EN,
-		MLX5_RXQ_CQE_COMP_EN,
+		NULL,
 	};
 	struct rte_kvargs *kvlist;
 	int ret = 0;
@@ -325,11 +327,12 @@ mlx5_args(struct priv *priv, struct rte_devargs *devargs)
 
 	if (devargs == NULL)
 		return 0;
+	/* Following UGLY cast is done to pass checkpatch. */
 	kvlist = rte_kvargs_parse(devargs->args, params);
 	if (kvlist == NULL)
 		return 0;
 	/* Process parameters. */
-	for (i = 0; (i != RTE_DIM(params)); ++i) {
+	for (i = 0; (params[i] != NULL); ++i) {
 		if (rte_kvargs_count(kvlist, params[i])) {
 			ret = rte_kvargs_process(kvlist, params[i],
 						 mlx5_args_check, priv);
@@ -512,6 +515,7 @@ mlx5_pci_devinit(struct rte_pci_driver *pci_drv, struct rte_pci_device *pci_dev)
 		priv->port = port;
 		priv->pd = pd;
 		priv->mtu = ETHER_MTU;
+		priv->mps = mps; /* Enable MPW by default if supported. */
 		priv->cqe_comp = 1; /* Enable compression by default. */
 		priv->mps = mps; /* Enable MPW by default if supported */
 		err = mlx5_args(priv, pci_dev->devargs);
