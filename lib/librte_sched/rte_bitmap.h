@@ -104,7 +104,7 @@ struct rte_bitmap {
 	uint32_t go2;     /**< Bitmap scan: Go/stop condition for current array2 cache line */
 
 	/* Storage space for array1 and array2 */
-	uint8_t memory[];
+	uint8_t memory[0];
 };
 
 static inline void
