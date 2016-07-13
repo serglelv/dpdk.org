@@ -163,6 +163,8 @@ struct rte_mempool_objhdr {
 #endif
 };
 
+#ifdef RTE_LIBRTE_MEMPOOL_DEBUG
+
 /**
  * Mempool object trailer structure
  *
@@ -170,10 +172,10 @@ struct rte_mempool_objhdr {
  * trailer structure containing a cookie preventing memory corruptions.
  */
 struct rte_mempool_objtlr {
-#ifdef RTE_LIBRTE_MEMPOOL_DEBUG
 	uint64_t cookie;                 /**< Debug cookie. */
-#endif
 };
+
+#endif
 
 /**
  * The RTE mempool structure.
