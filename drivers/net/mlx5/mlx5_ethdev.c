@@ -637,7 +637,7 @@ mlx5_dev_supported_ptypes_get(struct rte_eth_dev *dev)
  * @param wait_to_complete
  *   Wait for request completion (ignored).
  */
-static int
+int
 mlx5_link_update_unlocked(struct rte_eth_dev *dev, int wait_to_complete)
 {
 	struct priv *priv = mlx5_get_priv(dev);
@@ -1177,6 +1177,9 @@ priv_set_link(struct priv *priv, int up)
 		dev->rx_pkt_burst = removed_rx_burst;
 		dev->tx_pkt_burst = removed_tx_burst;
 	}
+
+	mlx5_link_update_unlocked(dev,1);
+	_rte_eth_dev_callback_process(dev, RTE_ETH_EVENT_INTR_LSC);
 	return 0;
 }
 
