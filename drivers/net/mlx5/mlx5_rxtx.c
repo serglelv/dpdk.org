@@ -482,7 +482,7 @@ first_seg:
 				length -= copy_b;
 				pkt_inline_sz += copy_b;
 				/* Sanity check. */
-				assert(addr == addr_end);
+				assert(addr <= addr_end);
 			}
 			/* Store the inlined packet size in the WQE. */
 			wqe->eseg.inline_hdr_sz = htons(pkt_inline_sz);
