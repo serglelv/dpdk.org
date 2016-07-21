@@ -78,6 +78,9 @@
 /* Room for inline data in multi-packet WQE. */
 #define MLX5_MWQE64_INL_DATA 28
 
+/* Create a vector built-in type. */
+typedef int mlx5_v16_t __attribute__((vector_size(16), aligned(16)));
+
 /* Subset of struct mlx5_wqe_eth_seg. */
 struct mlx5_wqe_eth_seg_small {
 	uint32_t rsvd0;
@@ -105,6 +108,12 @@ struct mlx5_wqe_ctrl {
 struct mlx5_wqe {
 	uint32_t ctrl[4];
 	struct mlx5_wqe_eth_seg_small eseg;
+};
+
+/* Vectorize header WQE. */
+struct mlx5_wqe_v {
+	mlx5_v16_t ctrl;
+	mlx5_v16_t eseg;
 };
 
 /* WQE. */
