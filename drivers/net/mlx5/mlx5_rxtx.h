@@ -54,6 +54,7 @@
 #endif
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
+#include <rte_common.h>
 #ifdef PEDANTIC
 #pragma GCC diagnostic error "-pedantic"
 #endif
@@ -238,6 +239,7 @@ struct hash_rxq {
 };
 
 /* TX queue descriptor. */
+RTE_STD_C11
 struct txq {
 	uint16_t elts_head; /* Current index in (*elts)[]. */
 	uint16_t elts_tail; /* First element awaiting completion. */
